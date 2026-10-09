@@ -1,0 +1,9 @@
+pandas>=2.2
+numpy>=1.26
+plotly>=5.20
+folium>=0.17
+requests>=2.31
+# Optional, only after WeatherNext Cloud access is approved (wnx/cloud.py):
+# google-cloud-bigquery
+# db-dtypes
+# xarray zarr gcsfs
