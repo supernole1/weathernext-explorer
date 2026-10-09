@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -75,15 +76,61 @@ def error_chart(errors: pd.DataFrame, column: str, ylabel: str, title: str) -> g
     return fig
 
 
-REFRESH_BAR = """
-<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:4px 0 8px">
-<button id="wnx-refresh" style="font:600 14px system-ui,sans-serif;padding:8px 16px;border-radius:6px;
- border:1px solid #1c5cab;background:#2a78d6;color:#fff;cursor:pointer">&#x27F3; Refresh everything</button>
+BUTTON_CSS = ("font:600 14px system-ui,sans-serif;padding:8px 16px;border-radius:6px;cursor:pointer;"
+              "border:1px solid #1c5cab;")
+REPO_URL = "https://github.com/supernole1/weathernext-explorer"
+
+# Refresh re-runs the scripts through scripts/serve.py. Share sends the clean copy in outputs/share/
+# (see write_report) through the device's share menu (email, text, WhatsApp, Nearby Share...).
+# Deliberately no Blob downloads or embedded iframes anywhere: email virus scanners treat those
+# patterns as "HTML smuggling" and block the attachment.
+TOOLBAR = """
+<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:4px 0 8px">
+<button id="wnx-refresh" style="{css}background:#2a78d6;color:#fff">&#x27F3; Refresh everything</button>
+<button id="wnx-share" style="{css}background:#fff;color:#1c5cab" title="Send this report to someone">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+ stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px">
+<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+<line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>Share</button>
 <span id="wnx-status" style="color:#52514e;font-size:13px">Data as of {built}</span></div>
 <script>
 (function () {
-  const btn = document.getElementById("wnx-refresh"), st = document.getElementById("wnx-status");
-  if (!location.protocol.startsWith("http")) {
+  const refreshable = {refreshable};
+  const shareUrl = "share/{stem}.html", fileName = "{file_name}", title = "{title}";
+  const btn = document.getElementById("wnx-refresh"), share = document.getElementById("wnx-share");
+  const st = document.getElementById("wnx-status");
+  const live = location.protocol.startsWith("http");
+
+  // Fetch the clean share copy up front, so the share menu opens instantly on click.
+  let shareFile = null;
+  if (live) fetch(shareUrl, {cache: "no-store"}).then(r => r.ok ? r.blob() : null)
+    .then(b => { if (b) shareFile = new File([b], fileName, {type: "text/html"}); }).catch(() => {});
+
+  function showManual() {
+    st.innerHTML = live
+      ? "Your browser can&#39;t share files directly. <a href='" + shareUrl + "' download='" + fileName +
+        "'>Save the report file</a>, then attach it to an email or text."
+      : "To share, attach this file from the project folder: outputs / share / {stem}.html";
+  }
+
+  share.onclick = async function () {
+    if (!shareFile || !(navigator.canShare && navigator.canShare({files: [shareFile]}))) return showManual();
+    const text = title + " (snapshot {built}). Open the attached file in a web browser. " +
+                 "On a phone, download it first, then open it with Chrome.";
+    st.textContent = "Opening your share menu...";
+    const t0 = Date.now();
+    try {
+      await navigator.share({files: [shareFile], title: title, text: text});
+      st.textContent = "Shared " + fileName + ".";
+    } catch (e) {
+      // A real "cancel" takes the user a moment; an instant AbortError means the menu failed to open.
+      if (e.name === "AbortError" && Date.now() - t0 > 1500) st.textContent = "Share cancelled.";
+      else showManual();
+    }
+  };
+
+  if (!refreshable) { btn.style.display = "none"; return; }
+  if (!live) {
     btn.disabled = true; btn.style.opacity = 0.5; btn.style.cursor = "default";
     st.textContent += ". Open this report from storm_report.bat to turn on Refresh.";
     return;
@@ -105,10 +152,40 @@ REFRESH_BAR = """
 </script>
 """
 
+# The shared copy has no toolbar script at all, just a note.
+SNAPSHOT_BAR = """<p style="background:#fff;border:1px solid #e6e5e0;border-radius:8px;padding:10px 14px">
+<b>Snapshot from {built}.</b> Forecasts change every few hours. For live updates, use the free
+<a href="{repo}">WeatherNext Explorer</a> storm viewer, and always check the
+<a href="https://www.nhc.noaa.gov/">National Hurricane Center</a>.</p>"""
+
+
+def inline_map(fig, height: int = 650) -> str:
+    """A folium figure as plain page content: Leaflet + the map's own div/style/script, no iframe.
+    Skips folium's default header (bootstrap, page-wide html/body styles) so the report's styling survives."""
+    fig.render()
+    header = fig.header.render()
+    keep = [line for line in header.splitlines() if "/leaflet@" in line]  # leaflet.js and leaflet.css
+    keep += re.findall(r"<style>\s*#map_\w+\s*\{.*?</style>", header, re.S)
+    return (f"{''.join(keep)}<div style=\"height:{height}px;position:relative\">{fig.html.render()}</div>"
+            f"<script>{fig.script.render()}</script>")
+
+
+def _page(heading: str, bar: str, notes: str, body: str, table_html: str) -> str:
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>{heading}</title>
+<style>body{{font-family:system-ui,sans-serif;background:{SURFACE};color:{INK};max-width:1100px;
+margin:0 auto;padding:16px}} p,li{{color:{INK_2}}} table{{border-collapse:collapse;font-size:13px}}
+td,th{{padding:4px 10px;border-bottom:1px solid {GRID};text-align:right}}</style></head><body>
+<h1>{heading}</h1>{bar}<p>{notes}</p>{body}{table_html}
+<p style="font-size:12px">Forecast data: Google DeepMind Weather Lab (CC BY 4.0 for data &gt;48h old).
+Observations: NOAA IBTrACS v04r01. NHC data: NOAA. Not an official forecast.</p></body></html>"""
+
 
 def write_report(figs: list, path: Path, heading: str, notes: str = "",
                  table_html: str = "", refreshable: bool = True) -> Path:
-    """figs may mix Plotly figures, folium maps (embedded as iframes) and raw HTML strings."""
+    """Write the live report to `path` and a clean share copy to `path.parent/share/`.
+
+    figs may mix Plotly figures, folium figures and raw HTML strings."""
     parts, plotly_loaded = [], False
     for f in figs:
         if isinstance(f, go.Figure):
@@ -117,18 +194,20 @@ def write_report(figs: list, path: Path, heading: str, notes: str = "",
         elif isinstance(f, str):
             parts.append(f)
         else:
-            parts.append(f._repr_html_())
+            height = getattr(f, "height", 650)
+            parts.append(inline_map(f, height if isinstance(height, int) else 650))
+    body = "".join(parts)
     now = datetime.now().astimezone()
     built = f"{now:%a %b %d, %I:%M %p} local ({now.astimezone(timezone.utc):%H:%M} UTC)"
-    bar = REFRESH_BAR.replace("{built}", built) if refreshable else f"<p>Built {built}</p>"
-    html = f"""<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>{heading}</title>
-<style>body{{font-family:system-ui,sans-serif;background:{SURFACE};color:{INK};max-width:1100px;
-margin:0 auto;padding:16px}} p,li{{color:{INK_2}}} table{{border-collapse:collapse;font-size:13px}}
-td,th{{padding:4px 10px;border-bottom:1px solid {GRID};text-align:right}}</style></head><body>
-<h1>{heading}</h1>{bar}<p>{notes}</p>{''.join(parts)}{table_html}
-<p style="font-size:12px">Forecast data: Google DeepMind Weather Lab (CC BY 4.0 for data &gt;48h old).
-Observations: NOAA IBTrACS v04r01.</p></body></html>"""
+    file_name = f"{path.stem}_{now.astimezone(timezone.utc):%Y-%m-%d_%H%MZ}.html"
+    bar = (TOOLBAR.replace("{css}", BUTTON_CSS).replace("{built}", built)
+           .replace("{refreshable}", "true" if refreshable else "false").replace("{stem}", path.stem)
+           .replace("{file_name}", file_name).replace("{title}", heading.replace('"', "'")))
+    snapshot = SNAPSHOT_BAR.replace("{built}", built).replace("{repo}", REPO_URL)
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(html, encoding="utf-8")
+    path.write_text(_page(heading, bar, notes, body, table_html), encoding="utf-8")
+    share = path.parent / "share" / path.name
+    share.parent.mkdir(exist_ok=True)
+    share.write_text(_page(heading, snapshot, notes, body, table_html), encoding="utf-8")
     return path

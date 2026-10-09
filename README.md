@@ -22,6 +22,9 @@ For any active storm, worldwide:
 - **Wind-speed chart:** all 64 intensity forecasts against NHC's official intensity forecast.
 - **Accuracy charts:** how far off earlier runs were, by forecast length, once the storm has a track history.
 - **Refresh everything button:** pulls the newest runs, advisory and radar with one click.
+- **Share button:** sends a snapshot of the report through your device's share menu (email, text,
+  WhatsApp, Nearby Share). The recipient just opens the file in a browser, with nothing to install. The shared
+  copy is kept free of anything email virus scanners object to, so Gmail accepts it as an attachment.
 - Built-in explainers: what WeatherNext 3 is, how DeepMind's AI forecasting works, and how to read the map.
 
 No accounts or API keys are needed. Every data source is free and public.
