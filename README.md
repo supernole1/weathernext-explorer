@@ -13,12 +13,15 @@ live radar, and satellite.
 
 For any active storm, worldwide:
 
+- **Current conditions panel** from the latest NHC advisory: category, wind, pressure, movement, distance
+  from landmarks, NHC headlines, watches and warnings in effect, and a link to the full advisory.
+
 - **Interactive map:** zoom down to counties and cities, and hover any point for time, wind and pressure.
   - all **64 WeatherNext 3 forecast tracks** and their average
   - the average of DeepMind's older operational cyclone model, for comparison
   - **NHC official** cone, track, and coastal hurricane/tropical-storm watches and warnings (Atlantic and Pacific storms NHC covers)
   - **live NEXRAD radar** (US) and **infrared satellite** (global)
-  - the observed track so far (NOAA IBTrACS)
+  - the observed track so far (NHC best track, updated each advisory; NOAA IBTrACS outside NHC's area)
 - **Wind-speed chart:** all 64 intensity forecasts against NHC's official intensity forecast.
 - **Accuracy charts:** how far off earlier runs were, by forecast length, once the storm has a track history.
 - **Refresh everything button:** pulls the newest runs, advisory and radar with one click.
@@ -66,8 +69,9 @@ Press **Refresh everything** to pick up whatever is newest.
 | Source | What it provides | Code |
 |---|---|---|
 | [Google DeepMind Weather Lab](https://deepmind.google.com/science/weatherlab) | WeatherNext cyclone tracks and intensity, ensemble mean and all members, 2024 to now | `wnx/weatherlab.py` |
-| [NHC CurrentStorms.json](https://www.nhc.noaa.gov/CurrentStorms.json) | Official cone, track, intensity forecast, watches and warnings | `wnx/nhc.py` |
-| [NOAA IBTrACS](https://www.ncei.noaa.gov/products/international-best-track-archive) | Observed storm tracks (runs about a day behind) | `wnx/ibtracs.py` |
+| [NHC CurrentStorms.json](https://www.nhc.noaa.gov/CurrentStorms.json) + public advisories | Current conditions, official cone, track, intensity forecast, watches and warnings | `wnx/nhc.py` |
+| [NHC best track (ATCF b-deck)](https://ftp.nhc.noaa.gov/atcf/btk/) | Observed track, updated with each advisory | `wnx/observed.py` |
+| [NOAA IBTrACS](https://www.ncei.noaa.gov/products/international-best-track-archive) | Observed tracks outside NHC's area (runs about a day behind) | `wnx/ibtracs.py` |
 | [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/) | Live US NEXRAD radar mosaic | `wnx/maps.py` |
 | [NOAA nowCOAST](https://nowcoast.noaa.gov/) | Live global infrared satellite | `wnx/maps.py` |
 | [Esri](https://www.esri.com/) | Street, topographic and light-gray base maps | `wnx/maps.py` |

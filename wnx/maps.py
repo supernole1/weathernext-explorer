@@ -99,6 +99,19 @@ def _add_official(m: folium.Map, f: OfficialForecast) -> None:
                             tooltip=f"{kind} ({issued})").add_to(layer)
 
 
+def _unwrap(df: pd.DataFrame | None, keys: list[str]) -> pd.DataFrame | None:
+    """Keep date-line-crossing tracks continuous. A West Pacific storm recurving past 180° jumps from +179 to
+    -179 and would be drawn the long way around the world, so shift that track's negative longitudes by +360."""
+    if df is None or df.empty:
+        return df
+    groups = df.groupby(keys)["lon"] if keys else [(None, df["lon"])]
+    crossing = pd.Series(False, index=df.index)
+    for _, lon in groups:
+        if lon.max() - lon.min() > 180:
+            crossing[lon.index] = True
+    return df.assign(lon=df["lon"].where(~crossing | (df["lon"] >= 0), df["lon"] + 360))
+
+
 def track_map(members: pd.DataFrame, means: pd.DataFrame, obs: pd.DataFrame | None,
               height: int = 650, counties: bool = True,
               official: list[OfficialForecast] | None = None) -> folium.Figure:
@@ -114,6 +127,9 @@ def track_map(members: pd.DataFrame, means: pd.DataFrame, obs: pd.DataFrame | No
     folium.TileLayer("Esri.WorldStreetMap", name="Street map (roads, cities)").add_to(m)
     _add_live_weather(m)
 
+    members = _unwrap(members, ["model", "init_time", "track_id", "sample"])
+    means = _unwrap(means, ["model", "init_time", "track_id"])
+    obs = _unwrap(obs, [])
     official = [f for f in (official or []) if f is not None]
     extra = [pd.DataFrame(f.cone or [[p.lat, p.lon] for p in f.track], columns=["lat", "lon"])
              for f in official]
@@ -151,7 +167,7 @@ def track_map(members: pd.DataFrame, means: pd.DataFrame, obs: pd.DataFrame | No
                                     tooltip=_point_tooltip(row, f"{model} mean {row.track_id}")).add_to(layer)
 
     if obs is not None and not obs.empty:
-        layer = folium.FeatureGroup(name="Observed track (IBTrACS)").add_to(m)
+        layer = folium.FeatureGroup(name=f"Observed track ({obs.attrs.get('source', 'IBTrACS')})").add_to(m)
         folium.PolyLine(obs[["lat", "lon"]].values.tolist(), color=OBS_COLOR, weight=3.5).add_to(layer)
         for row in obs.dropna(subset=["wind_kt"]).itertuples():
             folium.CircleMarker([row.lat, row.lon], radius=5, color="white", weight=1.5, fill=True,
@@ -184,7 +200,9 @@ yellow = tropical storm watch).</li>
 <li><b>Live radar</b> (on by default) shows rain from US NEXRAD radars, which reach roughly 150 miles offshore.
 <b>Live satellite</b> (off by default; tick it in the layer box) shows infrared cloud tops worldwide, so
 you can see a storm still far out at sea. Both are as of the time in the layer name. Press Refresh for newer images.</li>
-<li><b style="color:#eb6834">Orange: observed track</b> from NOAA IBTrACS. It usually runs about a day behind.</li>
+<li><b style="color:#eb6834">Orange: observed track.</b> For storms NHC tracks, this is NHC's official best
+track, updated with each advisory (about every 6 hours). Elsewhere it comes from NOAA's IBTrACS archive, which
+runs about a day behind.</li>
 </ul>
 <p style="margin:10px 0 4px"><b>Watch out for:</b></p>
 <ul style="margin:0;padding-left:20px;line-height:1.5">

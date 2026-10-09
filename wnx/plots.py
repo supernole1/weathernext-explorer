@@ -13,6 +13,8 @@ import plotly.graph_objects as go
 MODEL_COLORS = {"WNV3": "#2a78d6", "OPER": "#1baf7a", "FNV3P2": "#eda100",
                 "FNV3P1": "#e87ba4", "FNV3_LARGE_ENSEMBLE": "#4a3aa7"}
 OBS_COLOR = "#eb6834"
+MPH_PER_KT = 1.15078
+MI_PER_KM = 0.621371
 MEMBER_COLOR = "rgba(42,120,214,0.18)"
 INK, INK_2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e6e5e0", "#fcfcfb"
 
@@ -36,30 +38,30 @@ def intensity_plume(members: pd.DataFrame, means: pd.DataFrame, obs: pd.DataFram
         xs, ys = [], []
         for _, m in members.groupby(["model", "init_time", "sample"]):
             xs += list(m["valid_time"]) + [None]
-            ys += list(m["wind_kt"]) + [None]
+            ys += list(m["wind_kt"] * MPH_PER_KT) + [None]
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", line=dict(width=1, color=MEMBER_COLOR),
                                  hoverinfo="skip", name="Ensemble members"))
     for (model, init), m in means.groupby(["model", "init_time"]):
-        fig.add_trace(go.Scatter(x=m["valid_time"], y=m["wind_kt"], mode="lines",
+        fig.add_trace(go.Scatter(x=m["valid_time"], y=m["wind_kt"] * MPH_PER_KT, mode="lines",
                                  line=dict(width=2, color=MODEL_COLORS.get(model, "#2a78d6")),
                                  name=f"{model} mean, init {init:%m-%d %HZ}", legendgroup=model))
     if obs is not None and not obs.empty:
-        fig.add_trace(go.Scatter(x=obs["valid_time"], y=obs["wind_kt"], mode="lines+markers",
+        fig.add_trace(go.Scatter(x=obs["valid_time"], y=obs["wind_kt"] * MPH_PER_KT, mode="lines+markers",
                                  line=dict(width=2.5, color=OBS_COLOR), marker=dict(size=8),
-                                 name="Observed (IBTrACS)"))
+                                 name=f"Observed ({obs.attrs.get('source', 'IBTrACS')})"))
     if official is not None and official.track:
         pts = [p for p in official.track if p.valid_time and p.wind_kt is not None]
-        fig.add_trace(go.Scatter(x=[p.valid_time for p in pts], y=[p.wind_kt for p in pts],
+        fig.add_trace(go.Scatter(x=[p.valid_time for p in pts], y=[p.wind_kt * MPH_PER_KT for p in pts],
                                  mode="lines+markers", line=dict(width=2.5, color=INK, dash="dash"),
                                  marker=dict(size=8, color="white", line=dict(width=2, color=INK)),
                                  name=f"NHC official (adv {official.advisory})"))
     # Saffir-Simpson thresholds as recessive reference lines.
-    for kt, label in [(64, "Cat 1"), (96, "Cat 3"), (137, "Cat 5")]:
-        fig.add_hline(y=kt, line=dict(color="#c3c2b7", width=1, dash="dot"),
+    for mph, label in [(74, "Cat 1"), (111, "Cat 3"), (157, "Cat 5")]:
+        fig.add_hline(y=mph, line=dict(color="#c3c2b7", width=1, dash="dot"),
                       annotation_text=label, annotation_position="top left",
                       annotation_font=dict(color=INK_2, size=11))
     _style(fig, title).update_layout(height=420, hovermode="x unified",
-                                     yaxis_title="Max sustained wind (kt)")
+                                     yaxis_title="Max sustained wind (mph)")
     return fig
 
 
@@ -166,6 +168,7 @@ def inline_map(fig, height: int = 650) -> str:
     header = fig.header.render()
     keep = [line for line in header.splitlines() if "/leaflet@" in line]  # leaflet.js and leaflet.css
     keep += re.findall(r"<style>\s*#map_\w+\s*\{.*?</style>", header, re.S)
+    keep.append("<style>.leaflet-control-layers{font-size:12px;line-height:1.5}</style>")
     return (f"{''.join(keep)}<div style=\"height:{height}px;position:relative\">{fig.html.render()}</div>"
             f"<script>{fig.script.render()}</script>")
 
@@ -178,7 +181,7 @@ margin:0 auto;padding:16px}} p,li{{color:{INK_2}}} table{{border-collapse:collap
 td,th{{padding:4px 10px;border-bottom:1px solid {GRID};text-align:right}}</style></head><body>
 <h1>{heading}</h1>{bar}<p>{notes}</p>{body}{table_html}
 <p style="font-size:12px">Forecast data: Google DeepMind Weather Lab (CC BY 4.0 for data &gt;48h old).
-Observations: NOAA IBTrACS v04r01. NHC data: NOAA. Not an official forecast.</p></body></html>"""
+Observed tracks: NHC best track, or NOAA IBTrACS outside NHC's area. NHC data: NOAA. Not an official forecast.</p></body></html>"""
 
 
 def write_report(figs: list, path: Path, heading: str, notes: str = "",

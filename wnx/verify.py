@@ -32,6 +32,8 @@ def error_by_lead(paired: pd.DataFrame, max_lead: int = 120) -> pd.DataFrame:
     return (p.groupby(["model", "lead_time_hours"])
              .agg(track_error_km=("track_error_km", "mean"),
                   wind_mae_kt=("wind_error_kt", lambda s: s.abs().mean()),
+                  track_error_mi=("track_error_km", lambda s: s.mean() * 0.621371),
+                  wind_mae_mph=("wind_error_kt", lambda s: s.abs().mean() * 1.15078),
                   wind_bias_kt=("wind_error_kt", "mean"),
                   cases=("track_error_km", "size"))
              .reset_index())

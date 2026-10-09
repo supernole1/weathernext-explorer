@@ -43,6 +43,109 @@ class OfficialForecast:
     cone: list[list[float]] = field(default_factory=list)              # [[lat, lon], ...]
     track: list[TrackPoint] = field(default_factory=list)
     warnings: list[tuple[str, list[list[float]]]] = field(default_factory=list)  # (type, [[lat, lon]])
+    conditions: Conditions | None = None   # from the latest public advisory text
+
+
+@dataclass
+class Conditions:
+    """The 'SUMMARY ... INFORMATION' block of NHC's public advisory, in NHC's own words."""
+    title: str                      # e.g. "Hurricane Isaias Advisory Number 12"
+    issued_text: str                # e.g. "1000 AM CDT Fri Oct 09 2026"
+    url: str
+    headlines: list[str] = field(default_factory=list)   # "CENTER OF ISAIAS EXPECTED TO REACH..."
+    location: str = ""              # "27.7N 87.3W"
+    distances: list[str] = field(default_factory=list)   # "About 195 mi S of Pensacola Florida"
+    wind_mph: int | None = None
+    movement: str = ""              # "NNE at 16 mph"
+    pressure_mb: int | None = None
+    watches_warnings: list[tuple[str, list[str]]] = field(default_factory=list)  # (type, [areas])
+
+
+SMALL_WORDS = {"of", "the", "and", "to", "at", "in", "on", "for", "a"}
+
+
+def _title(text: str) -> str:
+    words = text.lower().split()
+    return " ".join(w if w in SMALL_WORDS else w[:1].upper() + w[1:] for w in words)
+
+
+def _parse_advisory(text: str, url: str) -> Conditions | None:
+    lines = [l.rstrip() for l in text.splitlines()]
+    title = next((l.strip() for l in lines if re.search(r"Advisory Number", l)), "")
+    if not title:
+        return None
+    i = next(i for i, l in enumerate(lines) if l.strip() == title)
+    c = Conditions(title=re.sub(r"\s+", " ", title), issued_text=lines[i + 2].strip() if i + 2 < len(lines) else "",
+                   url=url)
+
+    head, j = [], i + 3
+    while j < len(lines) and not lines[j].startswith("SUMMARY OF"):
+        if lines[j].strip():
+            head.append(lines[j].strip())
+        j += 1
+    # Headlines are "...TEXT..." blocks that may wrap across lines.
+    c.headlines = [h.strip(". ") for h in re.split(r"\.\.\.\s*\.\.\.", " ".join(head)) if h.strip(". ")]
+
+    for l in lines[j:]:
+        if l.startswith("WATCHES AND WARNINGS") or l.startswith("DISCUSSION AND OUTLOOK"):
+            break
+        if m := re.match(r"LOCATION\.\.\.(.+)", l):
+            c.location = m.group(1).strip()
+        elif m := re.match(r"ABOUT (\d+) MI\.\.\.\d+ KM (\w+) OF (.+)", l):
+            c.distances.append(f"About {m.group(1)} mi {m.group(2)} of {_title(m.group(3))}")
+        elif m := re.match(r"MAXIMUM SUSTAINED WINDS\.\.\.(\d+) MPH", l):
+            c.wind_mph = int(m.group(1))
+        elif m := re.match(r"PRESENT MOVEMENT\.\.\.(\w+) OR \d+ DEGREES AT (\d+) MPH", l):
+            c.movement = f"{m.group(1)} at {m.group(2)} mph"
+        elif m := re.match(r"PRESENT MOVEMENT\.\.\.(.+?)(?:\.\.\.|$)", l):
+            c.movement = m.group(1).strip().capitalize()   # e.g. "Stationary"
+        elif m := re.match(r"MINIMUM CENTRAL PRESSURE\.\.\.(\d+) MB", l):
+            c.pressure_mb = int(m.group(1))
+
+    # "A Hurricane Warning is in effect for..." followed by "* area" bullet lines.
+    in_summary, current = False, None
+    for l in lines:
+        s = l.strip()
+        if s.startswith("SUMMARY OF WATCHES AND WARNINGS IN EFFECT"):
+            in_summary = True
+        elif in_summary and (s.startswith("For storm information") or s.startswith("DISCUSSION AND OUTLOOK")
+                             or s.startswith("Interests elsewhere")):
+            break
+        elif in_summary and (m := re.match(r"An? (.+?) is in effect for", s)):
+            current = (m.group(1), [])
+            c.watches_warnings.append(current)
+        elif in_summary and current and s.startswith("*"):
+            current[1].append(s.lstrip("* ").strip())
+        elif in_summary and current and current[1] and s:   # a bullet wrapped onto the next line
+            current[1][-1] += " " + s
+        elif in_summary and not s:
+            current = None                                  # blank line ends the bullet list
+    return c
+
+
+def _conditions(url: str) -> Conditions | None:
+    try:
+        html = requests.get(url, headers=HEADERS, timeout=30).text
+    except requests.RequestException:
+        return None
+    pre = re.search(r"<pre[^>]*>(.*?)</pre>", html, re.S | re.I)
+    text = re.sub(r"<[^>]+>", "", pre.group(1) if pre else html)
+    try:
+        return _parse_advisory(text, url)
+    except (StopIteration, IndexError):
+        return None
+
+
+def saffir_simpson(wind_kt: float, classification: str) -> str:
+    """Category label from max wind (kt) and NHC's classification code."""
+    if classification in ("HU", "TY", "MH"):
+        for floor, cat in [(137, "Category 5"), (113, "Category 4"), (96, "Category 3"), (83, "Category 2")]:
+            if wind_kt >= floor:
+                return f"{cat} hurricane"
+        return "Category 1 hurricane"
+    return {"TS": "Tropical storm", "TD": "Tropical depression", "STS": "Subtropical storm",
+            "SD": "Subtropical depression", "PTC": "Potential tropical cyclone",
+            "PC": "Post-tropical cyclone"}.get(classification, classification)
 
 
 def _kml(url: str) -> str:
@@ -87,6 +190,9 @@ def official_forecast(atcf_id: str) -> OfficialForecast | None:
         current_lat=s["latitudeNumeric"], current_lon=s["longitudeNumeric"],
         current_wind_kt=float(s["intensity"]), current_mslp_hpa=float(s["pressure"]))
 
+    if s.get("publicAdvisory", {}).get("url"):
+        fc.conditions = _conditions(s["publicAdvisory"]["url"])
+
     try:
         if s.get("trackCone"):
             kml = _kml(s["trackCone"]["kmzFile"])
@@ -114,3 +220,66 @@ def official_forecast(atcf_id: str) -> OfficialForecast | None:
     except (requests.RequestException, zipfile.BadZipFile, StopIteration, ValueError):
         pass  # show whatever pieces we did get
     return fc
+
+
+# Swatch colors match the coastline segments on the map (wnx/maps.py WARNING_COLORS).
+WW_COLORS = {"Hurricane Warning": "#d00000", "Hurricane Watch": "#f08cb4",
+             "Tropical Storm Warning": "#1f3c88", "Tropical Storm Watch": "#f2c200",
+             "Storm Surge Warning": "#a01ac4", "Storm Surge Watch": "#d6a8ec"}
+
+
+def _tile(label: str, value: str, sub: str = "") -> str:
+    sub_html = f'<div style="font-size:12px;color:#52514e">{sub}</div>' if sub else ""
+    return (f'<div style="min-width:130px"><div style="font-size:12px;color:#52514e">{label}</div>'
+            f'<div style="font-size:20px;font-weight:700;color:#0b0b0b">{value}</div>{sub_html}</div>')
+
+
+def conditions_html(fc: OfficialForecast | None) -> str:
+    """'Current conditions' panel from the latest NHC advisory, or a note if NHC isn't tracking the storm."""
+    box = ("border:1px solid #e6e5e0;border-radius:8px;padding:12px 18px;margin:12px 0;background:#fff;"
+           "border-left:6px solid {accent}")
+    if fc is None:
+        return (f'<div style="{box.format(accent="#c3c2b7")}"><b>No NHC advisory for this storm.</b> '
+                "The National Hurricane Center covers the Atlantic and the eastern and central Pacific. For other "
+                'basins, see the <a href="https://www.metoc.navy.mil/jtwc/jtwc.html">Joint Typhoon Warning Center</a> '
+                "or the regional weather agency.</div>")
+    c = fc.conditions
+    kind = saffir_simpson(fc.current_wind_kt, fc.classification)
+    major = " · major hurricane" if kind.startswith(("Category 3", "Category 4", "Category 5")) else ""
+    accent = "#d00000" if fc.classification == "HU" else "#1f3c88" if fc.classification in ("TS", "STS") else "#8a8984"
+    title = f"{fc.name}: {kind}{major}"
+    if c is None:   # advisory text unavailable; fall back to the JSON summary
+        return (f'<div style="{box.format(accent=accent)}"><div style="font-size:20px;font-weight:700">{title}</div>'
+                f"{fc.current_wind_kt:.0f} kt · {fc.current_mslp_hpa:.0f} mb · {fc.current_lat}, {fc.current_lon}"
+                f" · NHC advisory {fc.advisory}</div>")
+
+    adv = re.sub(r".*Advisory Number\s*", "Advisory ", c.title)
+    if "Intermediate" in c.title:
+        adv = "Intermediate " + adv.lower()
+    heads = "".join(f'<div style="font-weight:600;color:#0b0b0b;margin:6px 0 0">{h}</div>' for h in c.headlines)
+    tiles = "".join([
+        _tile("Max sustained wind", f"{c.wind_mph} mph" if c.wind_mph else f"{fc.current_wind_kt:.0f} kt",
+              f"{fc.current_wind_kt:.0f} kt" if c.wind_mph else ""),
+        _tile("Min. pressure", f"{c.pressure_mb} mb" if c.pressure_mb else "n/a"),
+        _tile("Moving", c.movement or "n/a"),
+        _tile("Center", c.location or f"{fc.current_lat}, {fc.current_lon}"),
+    ])
+    where = " · ".join(c.distances)
+    ww = ""
+    if c.watches_warnings:
+        items = "".join(
+            f'<li style="margin:3px 0"><span style="display:inline-block;width:11px;height:11px;border-radius:2px;'
+            f'background:{WW_COLORS.get(kind_, "#8a8984")};margin-right:7px;vertical-align:-1px"></span>'
+            f'<b>{kind_}:</b> {"; ".join(areas)}</li>'
+            for kind_, areas in c.watches_warnings)
+        ww = (f'<div style="margin-top:10px;font-size:13px;color:#0b0b0b"><b>Watches &amp; warnings in effect</b>'
+              f'<ul style="list-style:none;padding:0;margin:4px 0 0">{items}</ul></div>')
+    return f"""<div style="{box.format(accent=accent)}">
+<div style="font-size:12px;color:#52514e;text-transform:uppercase;letter-spacing:.04em">Current conditions ·
+National Hurricane Center</div>
+<div style="font-size:22px;font-weight:700;color:#0b0b0b;margin:2px 0">{title}</div>
+<div style="font-size:13px;color:#52514e">{adv} · issued {c.issued_text}</div>{heads}
+<div style="display:flex;flex-wrap:wrap;gap:14px 28px;margin:12px 0 6px">{tiles}</div>
+<div style="font-size:13px;color:#52514e">{where}</div>{ww}
+<div style="margin-top:10px;font-size:13px"><a href="{c.url}">Read the full NHC advisory &rarr;</a></div>
+</div>"""

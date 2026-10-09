@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from wnx import about, ibtracs, maps, nhc, plots, verify, weatherlab  # noqa: E402
+from wnx import about, maps, nhc, observed, plots, verify, weatherlab  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -51,10 +51,11 @@ def main() -> None:
     else:
         ap.error("give --latest, or both --start and --end")
 
-    print(f"Loading observed track for {storm} from IBTrACS...")
-    obs = ibtracs.load_storm(storm)
-    name = obs["name"].iloc[0].title() if not obs.empty else storm
-    print(f"  {len(obs)} observed points" if not obs.empty else "  none found (storm may be too new)")
+    print(f"Loading observed track for {storm}...")
+    obs = observed.load_storm(storm)
+    name = obs["name"].iloc[-1].title() if not obs.empty else storm
+    print(f"  {len(obs)} observed points from {obs.attrs['source']}, latest {obs['valid_time'].max():%m-%d %HZ}"
+          if not obs.empty else "  none found (storm may be too new)")
 
     official = nhc.official_forecast(storm)
     print(f"NHC advisory {official.advisory} issued {official.issued:%Y-%m-%d %HZ}: "
@@ -81,6 +82,7 @@ def main() -> None:
     runs = ", ".join(f"{m} {t:%m-%d %HZ}" for m, t in spag_for.items())
 
     figs = [
+        nhc.conditions_html(official),
         about.ABOUT_HTML,
         f"<h3>{name} ({storm}): newest forecast tracks ({runs})</h3>"
         "<p>Scroll to zoom, hover the dots for time and intensity. Use the box at top right to "
@@ -95,15 +97,16 @@ def main() -> None:
         paired = verify.pair_with_obs(means, obs)
         errs = verify.error_by_lead(paired, args.max_lead)
         figs += [
-            plots.error_chart(errs, "track_error_km", "Mean track error (km)",
-                              f"{name}: track error vs lead time (all inits {start:%m-%d}–{end:%m-%d})"),
-            plots.error_chart(errs, "wind_mae_kt", "Mean absolute wind error (kt)",
-                              f"{name}: intensity error vs lead time"),
+            plots.error_chart(errs, "track_error_mi", "Mean track error (miles)",
+                              f"{name}: track error vs forecast length (runs {start:%m-%d}–{end:%m-%d}, "
+                              f"checked against {obs.attrs['source']} through {obs['valid_time'].max():%m-%d %HZ})"),
+            plots.error_chart(errs, "wind_mae_mph", "Mean absolute wind error (mph)",
+                              f"{name}: intensity error vs forecast length"),
         ]
         pivot = errs[errs["lead_time_hours"] % 24 == 0].pivot(
-            index="lead_time_hours", columns="model", values="track_error_km").round(0)
-        table_html = "<h3>Mean track error (km) by lead time</h3>" + pivot.to_html()
-        print("\nMean track error (km):\n" + pivot.to_string())
+            index="lead_time_hours", columns="model", values="track_error_mi").round(0)
+        table_html = "<h3>Mean track error (miles) by forecast length (hours)</h3>" + pivot.to_html()
+        print("\nMean track error (miles):\n" + pivot.to_string())
 
     out = plots.write_report(
         figs, ROOT / "outputs" / f"{storm}_report.html", f"{name} ({storm}) — WeatherNext cyclone forecasts",
