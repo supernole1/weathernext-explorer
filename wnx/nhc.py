@@ -10,7 +10,7 @@ import io
 import re
 import zipfile
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -59,6 +59,7 @@ class Conditions:
     movement: str = ""              # "NNE at 16 mph"
     pressure_mb: int | None = None
     watches_warnings: list[tuple[str, list[str]]] = field(default_factory=list)  # (type, [areas])
+    next_advisories: list[str] = field(default_factory=list)  # "Next intermediate advisory at 100 PM CDT."
 
 
 SMALL_WORDS = {"of", "the", "and", "to", "at", "in", "on", "for", "a"}
@@ -120,7 +121,14 @@ def _parse_advisory(text: str, url: str) -> Conditions | None:
             current[1][-1] += " " + s
         elif in_summary and not s:
             current = None                                  # blank line ends the bullet list
+
+    c.next_advisories = [_pretty_times(l.strip()) for l in lines if re.match(r"\s*Next .*advisory at", l)]
     return c
+
+
+def _pretty_times(text: str) -> str:
+    """'Next complete advisory at 400 PM CDT.' -> 'Next complete advisory at 4:00 PM CDT.'"""
+    return re.sub(r"\b(\d{1,2})(\d{2}) (AM|PM)\b", r"\1:\2 \3", text)
 
 
 def _conditions(url: str) -> Conditions | None:
@@ -255,7 +263,7 @@ def conditions_html(fc: OfficialForecast | None) -> str:
 
     adv = re.sub(r".*Advisory Number\s*", "Advisory ", c.title)
     if "Intermediate" in c.title:
-        adv = "Intermediate " + adv.lower()
+        adv = "Intermediate a" + adv[1:]
     heads = "".join(f'<div style="font-weight:600;color:#0b0b0b;margin:6px 0 0">{h}</div>' for h in c.headlines)
     tiles = "".join([
         _tile("Max sustained wind", f"{c.wind_mph} mph" if c.wind_mph else f"{fc.current_wind_kt:.0f} kt",
@@ -265,6 +273,20 @@ def conditions_html(fc: OfficialForecast | None) -> str:
         _tile("Center", c.location or f"{fc.current_lat}, {fc.current_lon}"),
     ])
     where = " · ".join(c.distances)
+    # Near landfall NHC posts hourly position updates between advisories; CurrentStorms.json carries them.
+    adv_pos = re.match(r"([\d.]+)([NS])\s+([\d.]+)([EW])", c.location or "")
+    if adv_pos:
+        lat = float(adv_pos.group(1)) * (1 if adv_pos.group(2) == "N" else -1)
+        lon = float(adv_pos.group(3)) * (1 if adv_pos.group(4) == "E" else -1)
+        if abs(lat - fc.current_lat) > 0.05 or abs(lon - fc.current_lon) > 0.05:
+            when = fc.issued.replace(tzinfo=timezone.utc).astimezone().strftime("%I:%M %p").lstrip("0")
+            where += (f'<div style="margin-top:4px;color:#0b0b0b"><b>Latest NHC position update ({when}):</b> '
+                      f"{abs(fc.current_lat):.1f}{'N' if fc.current_lat >= 0 else 'S'} "
+                      f"{abs(fc.current_lon):.1f}{'W' if fc.current_lon < 0 else 'E'} · "
+                      f"{round(fc.current_wind_kt * 1.15078 / 5) * 5:.0f} mph · {fc.current_mslp_hpa:.0f} mb</div>")
+    checked = datetime.now().astimezone().strftime("%I:%M %p").lstrip("0")
+    nxt = (f" · <b>{' '.join(c.next_advisories)}</b>" if c.next_advisories else "") + \
+          f" <span style='color:#8a8984'>(checked NHC at {checked})</span>"
     ww = ""
     if c.watches_warnings:
         items = "".join(
@@ -278,7 +300,7 @@ def conditions_html(fc: OfficialForecast | None) -> str:
 <div style="font-size:12px;color:#52514e;text-transform:uppercase;letter-spacing:.04em">Current conditions ·
 National Hurricane Center</div>
 <div style="font-size:22px;font-weight:700;color:#0b0b0b;margin:2px 0">{title}</div>
-<div style="font-size:13px;color:#52514e">{adv} · issued {c.issued_text}</div>{heads}
+<div style="font-size:13px;color:#52514e">{adv} · issued {_pretty_times(c.issued_text)}{nxt}</div>{heads}
 <div style="display:flex;flex-wrap:wrap;gap:14px 28px;margin:12px 0 6px">{tiles}</div>
 <div style="font-size:13px;color:#52514e">{where}</div>{ww}
 <div style="margin-top:10px;font-size:13px"><a href="{c.url}">Read the full NHC advisory &rarr;</a></div>
