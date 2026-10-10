@@ -168,7 +168,8 @@ def inline_map(fig, height: int = 650) -> str:
     header = fig.header.render()
     keep = [line for line in header.splitlines() if "/leaflet@" in line]  # leaflet.js and leaflet.css
     keep += re.findall(r"<style>\s*#map_\w+\s*\{.*?</style>", header, re.S)
-    keep.append("<style>.leaflet-control-layers{font-size:12px;line-height:1.5}</style>")
+    keep.append("<style>.leaflet-control-layers{font-size:12px;line-height:1.5}"
+                ".leaflet-tooltip-pane{z-index:850}</style>")  # tooltips above the map's control boxes
     return (f"{''.join(keep)}<div style=\"height:{height}px;position:relative\">{fig.html.render()}</div>"
             f"<script>{fig.script.render()}</script>")
 

@@ -44,6 +44,12 @@ class OfficialForecast:
     track: list[TrackPoint] = field(default_factory=list)
     warnings: list[tuple[str, list[list[float]]]] = field(default_factory=list)  # (type, [[lat, lon]])
     conditions: Conditions | None = None   # from the latest public advisory text
+    # Wind field: (threshold kt 34/50/64, polygon [[lat, lon], ...]) now and over the forecast,
+    # plus NHC's earliest reasonable arrival time of 39+ mph winds: (label like "Sat 2 am", line).
+    wind_now: list[tuple[int, list[list[float]]]] = field(default_factory=list)
+    wind_forecast: list[tuple[int, list[list[float]]]] = field(default_factory=list)
+    arrival_34kt: list[tuple[str, list[list[float]]]] = field(default_factory=list)
+    arrival_tz: str = ""
 
 
 @dataclass
@@ -227,6 +233,29 @@ def official_forecast(atcf_id: str) -> OfficialForecast | None:
                     fc.warnings.append((name.group(1) if name else "Warning", _coords(c)))
     except (requests.RequestException, zipfile.BadZipFile, StopIteration, ValueError):
         pass  # show whatever pieces we did get
+
+    for key, target in (("initialWindExtent", fc.wind_now), ("forecastWindRadiiGIS", fc.wind_forecast)):
+        try:
+            if s.get(key, {}).get("kmzFile"):
+                for pm in re.findall(r"<Placemark>.*?</Placemark>", _kml(s[key]["kmzFile"]), re.S):
+                    kt = re.search(r"<name>\s*(\d+)\s*</name>", pm)
+                    for ring in re.findall(r"<outerBoundaryIs>.*?<coordinates>(.*?)</coordinates>", pm, re.S):
+                        if kt:
+                            target.append((int(kt.group(1)), _coords(ring)))
+        except (requests.RequestException, zipfile.BadZipFile, StopIteration, ValueError):
+            pass
+    try:
+        if s.get("earliestArrivalTimeTSWindsGIS", {}).get("kmzFile"):
+            kml = _kml(s["earliestArrivalTimeTSWindsGIS"]["kmzFile"])
+            tz = re.search(r'<Data name="timezone">\s*<value>(\w+)</value>', kml)
+            fc.arrival_tz = tz.group(1) if tz else ""
+            for pm in re.findall(r"<Placemark>.*?</Placemark>", kml, re.S):
+                label = re.search(r"<td>(.*?)</td>", pm)
+                line = re.search(r"<LineString>\s*<coordinates>(.*?)</coordinates>", pm, re.S)
+                if label and line and "Probability" not in label.group(1):
+                    fc.arrival_34kt.append((label.group(1).strip(), _coords(line.group(1))))
+    except (requests.RequestException, zipfile.BadZipFile, StopIteration, ValueError):
+        pass
     return fc
 
 

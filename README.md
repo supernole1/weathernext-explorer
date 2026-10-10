@@ -21,6 +21,11 @@ For any active storm, worldwide:
   - the average of DeepMind's older operational cyclone model, for comparison
   - **NHC official** cone, track, and coastal hurricane/tropical-storm watches and warnings (Atlantic and Pacific storms NHC covers)
   - **live NEXRAD radar** (US) and **infrared satellite** (global)
+  - **measured wind** at airports and NOAA buoys (sustained and gusts, color-coded, with a faulty-sensor check)
+  - **NHC wind field:** how far 39/58/74+ mph winds reach now and over the forecast, plus NHC's earliest
+    arrival times for tropical-storm-force winds
+  - **your location:** enter a ZIP for a ★ on the map. Hover it to see how far the storm is, where and when
+    each model's average track passes closest, and how many of the 64 forecasts bring the center within 50/100 mi
   - the observed track so far (NHC best track, updated each advisory; NOAA IBTrACS outside NHC's area)
 - **Wind-speed chart:** all 64 intensity forecasts against NHC's official intensity forecast.
 - **Accuracy charts:** how far off earlier runs were, by forecast length, once the storm has a track history.
@@ -72,7 +77,9 @@ Press **Refresh everything** to pick up whatever is newest.
 | [NHC CurrentStorms.json](https://www.nhc.noaa.gov/CurrentStorms.json) + public advisories | Current conditions, official cone, track, intensity forecast, watches and warnings | `wnx/nhc.py` |
 | [NHC best track (ATCF b-deck)](https://ftp.nhc.noaa.gov/atcf/btk/) | Observed track, updated with each advisory | `wnx/observed.py` |
 | [NOAA IBTrACS](https://www.ncei.noaa.gov/products/international-best-track-archive) | Observed tracks outside NHC's area (runs about a day behind) | `wnx/ibtracs.py` |
-| [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/) | Live US NEXRAD radar mosaic | `wnx/maps.py` |
+| [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/) | Live US NEXRAD radar mosaic; airport (ASOS) wind observations | `wnx/maps.py`, `wnx/windobs.py` |
+| [NOAA NDBC](https://www.ndbc.noaa.gov/) | Buoy and coastal-station wind, pressure and waves | `wnx/windobs.py` |
+| [Zippopotam.us](https://zippopotam.us/) | ZIP code → map location for the ★ (looked up once, then saved in your browser) | `wnx/static/my_location.js` |
 | [NOAA nowCOAST](https://nowcoast.noaa.gov/) | Live global infrared satellite | `wnx/maps.py` |
 | [Esri](https://www.esri.com/) | Street, topographic and light-gray base maps | `wnx/maps.py` |
 | [Open-Meteo](https://open-meteo.com/en/docs/google-weathernext-api) | Point forecasts from the WeatherNext 2 ensemble (optional script) | `wnx/openmeteo.py` |
