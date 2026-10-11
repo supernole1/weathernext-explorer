@@ -33,29 +33,27 @@ def command_for(page: str) -> list[str] | None:
         return [PY, str(ROOT / "scripts" / "gulf_outlook.py")]
     if m := re.fullmatch(r"forecast_(\d{5})\.html", page):
         return [PY, str(ROOT / "scripts" / "my_forecast.py"), m.group(1)]
+    if m := re.fullmatch(r"winter_(\d{5})\.html", page):
+        return [PY, str(ROOT / "scripts" / "winter_outlook.py"), m.group(1)]
     return None
 
 
 ZIP_FILE = ROOT / "data" / "my_zip.txt"   # remembered between sessions (data/ is not in git)
 
 
-def open_forecast(base: str) -> None:
+def open_for_zip(base: str, kind: str) -> None:
+    """Local forecast (kind 'forecast') or winter outlook (kind 'winter') for a ZIP, remembering the ZIP."""
+    what = "your forecast" if kind == "forecast" else "your winter outlook"
     saved = ZIP_FILE.read_text().strip() if ZIP_FILE.exists() else ""
-    prompt = f"ZIP code for your forecast [{saved}]: " if saved else "ZIP code for your forecast: "
+    prompt = f"ZIP code for {what} [{saved}]: " if saved else f"ZIP code for {what}: "
     zip_code = input(prompt).strip() or saved
     if not re.fullmatch(r"\d{5}", zip_code):
         print("Please enter a 5-digit US ZIP code.")
         return
-    print(f"Building forecast for {zip_code}...", flush=True)
-    result = run(command_for(f"forecast_{zip_code}.html"))
-    if result.returncode != 0:
-        print((result.stderr or result.stdout).strip().splitlines()[-1])
-        return
     ZIP_FILE.parent.mkdir(exist_ok=True)
     ZIP_FILE.write_text(zip_code)
-    print(result.stdout.split("\nForecast written")[0].strip())
-    webbrowser.open(f"{base}/forecast_{zip_code}.html")
-    print(f"\nOpened {base}/forecast_{zip_code}.html")
+    split = "\nForecast written" if kind == "forecast" else "\nOutlook written"
+    open_page(base, f"{kind}_{zip_code}.html", f"Building {what} for {zip_code}...", split)
 
 
 def open_page(base: str, page: str, message: str, split: str) -> None:
@@ -142,7 +140,7 @@ def main() -> None:
     while True:
         print()
         storm = input("Storm ID to open (e.g. AL092026), M for the all-storms map, "
-                      "F for your local forecast,\n  G for the 15-day Gulf tropical outlook, Q to quit: ").strip()
+                      "F for your local forecast,\n  G for the 15-day Gulf tropical outlook, W for your winter outlook, Q to quit: ").strip()
         if storm.upper() == "Q":
             return
         if storm.upper() == "M":
@@ -152,8 +150,8 @@ def main() -> None:
             open_page(base, "gulf_outlook.html", "Building the 15-day Gulf outlook (first time takes a few minutes)...",
                       "\nOutlook written")
             continue
-        if storm.upper() == "F":
-            open_forecast(base)
+        if storm.upper() in ("F", "W"):
+            open_for_zip(base, "forecast" if storm.upper() == "F" else "winter")
             continue
         if not re.fullmatch(r"[A-Za-z]{2}\d{6}", storm):
             print("That doesn't look like a storm ID: two letters and six digits, like AL092026.")

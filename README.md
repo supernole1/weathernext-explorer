@@ -40,6 +40,9 @@ For any active storm, worldwide:
 - **15-day Gulf tropical outlook:** the chance that a tropical storm forms in the Gulf of America or NW Caribbean,
   by day, from all 64 WeatherNext 2 forecasts, with a map of where the forecast storms form and go next to
   NHC's official 7-day outlook areas.
+- **Winter outlook for your ZIP:** NOAA's official 3-month outlooks at your location, the current El Niño /
+  La Niña status, and the 51-member ECMWF seasonal forecast month by month (temperature and rain vs normal, and the
+  share of forecasts warmer or wetter), with collapsible explainers on how seasonal outlooks work.
 - Built-in explainers: what WeatherNext 3 is, how DeepMind's AI forecasting works, and how to read the map.
 
 No accounts or API keys are needed. Every data source is free and public.
@@ -59,7 +62,7 @@ during the install.
 
    The first run sets everything up automatically, which takes about a minute.
 3. It lists the active storms. Type a storm ID (e.g. `AL092026`) and the report opens in your browser.
-   Type `M` for a map of all storms, `F` for your local forecast, `G` for the Gulf tropical outlook, or `Q` to quit.
+   Type `M` for a map of all storms, `F` for your local forecast, `G` for the Gulf tropical outlook, `W` for your winter outlook, or `Q` to quit.
 
    You can open a second window (double-click again) to keep a storm and your local forecast up side by side.
 
@@ -93,6 +96,8 @@ Press **Refresh everything** to pick up whatever is newest.
 | [NOAA nowCOAST](https://nowcoast.noaa.gov/) | Live global infrared satellite | `wnx/maps.py` |
 | [Esri](https://www.esri.com/) | Street, topographic and light-gray base maps | `wnx/maps.py` |
 | [Open-Meteo](https://open-meteo.com/en/docs/google-weathernext-api) | Local forecast page, Gulf tropical outlook and point forecasts from the WeatherNext 2 ensemble | `wnx/forecast.py`, `wnx/gulf.py`, `wnx/openmeteo.py` |
+| [Open-Meteo seasonal API](https://open-meteo.com/en/docs/seasonal-forecast-api) | ECMWF SEAS5 seasonal forecast, 51 members, ~7 months | `wnx/seasonal.py` |
+| [NOAA Climate Prediction Center](https://www.cpc.ncep.noaa.gov/) | Official 3-month outlooks and El Niño / La Niña status | `wnx/seasonal.py` |
 | [NHC Tropical Weather Outlook](https://www.nhc.noaa.gov/gtwo.php?basin=atlc) | Official 2- and 7-day formation chances and outlined areas | `wnx/gulf.py` |
 
 Weather Lab model codes: `WNV3` = WeatherNext 3 (64 members), `OPER` = WeatherNext Cyclones operational model
@@ -118,6 +123,9 @@ run.bat scripts\storm_report.py AL092026 --latest
 
 # A past storm over a fixed window, e.g. Hurricane Melissa 2025
 run.bat scripts\storm_report.py AL132025 --start 2025-10-21 --end 2025-10-29 --spaghetti 2025-10-25T06
+
+# Winter (seasonal) outlook for a US ZIP code
+run.bat scripts\winter_outlook.py 32578
 
 # 15-day tropical outlook for the Gulf of America and NW Caribbean
 run.bat scripts\gulf_outlook.py
