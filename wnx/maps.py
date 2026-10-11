@@ -366,3 +366,72 @@ apart. The legend box shows each one's time, and newer generally beats older.</l
 <li>This is experimental research data. Use NHC and your local officials for decisions.</li>
 </ul></div>
 """
+
+
+HISTORY_COLORS = {"WNV3": MODEL_COLORS["WNV3"], "OPER": MODEL_COLORS["OPER"], "NHC": "#0b0b0b"}
+
+
+def history_map(obs: pd.DataFrame, runs: list[dict], height: int = 600) -> folium.Figure:
+    """Past forecasts vs the observed track. One layer per forecast time ('made 48 h before'); the part of each
+    forecast that has already happened is solid with gray connectors to the actual position at that moment."""
+    from .history import SOURCES
+
+    fig = folium.Figure(height=height)
+    m = folium.Map(tiles=None, control_scale=True).add_to(fig)
+    folium.TileLayer("Esri.WorldStreetMap", name="Street map").add_to(m)
+    folium.TileLayer("Esri.WorldGrayCanvas", name="Light gray map").add_to(m)
+
+    obs_u = _unwrap(obs, [])
+    default = 48 if any(r["lag"] == 48 for r in runs) else (runs[0]["lag"] if runs else None)
+    all_lat, all_lon = list(obs_u["lat"]), list(obs_u["lon"])
+    for r in runs:
+        layer = folium.FeatureGroup(name=f"Forecasts made {r['lag']} h before ({r['init']:%a %b %d %HZ})",
+                                    show=r["lag"] == default).add_to(m)
+        for src, df in r["sources"].items():
+            df = _unwrap(df, [])
+            color = HISTORY_COLORS[src]
+            done, ahead = df[df["verified"]], df[~df["verified"]]
+            if len(done) > 1:
+                folium.PolyLine(done[["lat", "lon"]].values.tolist(), color=color, weight=3.5,
+                                tooltip=f"{SOURCES[src]} forecast made {r['init']:%a %HZ}").add_to(layer)
+            if not ahead.empty:
+                tail = pd.concat([done.tail(1), ahead])
+                folium.PolyLine(tail[["lat", "lon"]].values.tolist(), color=color, weight=2, opacity=0.6,
+                                dash_array="2 6", tooltip=f"{SOURCES[src]}: still in the future").add_to(layer)
+            for p in df.itertuples():
+                when = f"{p.valid_time:%a %b %d %H:%MZ} (+{int(p.lead_time_hours)} h)"
+                if p.verified:
+                    obs_lon = p.obs_lon + 360 if (p.lon > 180 and p.obs_lon < 0) else p.obs_lon
+                    folium.PolyLine([[p.lat, p.lon], [p.obs_lat, obs_lon]], color="#8a8984", weight=1.2,
+                                    dash_array="3 3").add_to(layer)
+                    wind = ""
+                    if pd.notna(p.wind_kt) and pd.notna(p.obs_wind_kt):
+                        wind = (f"<br>Forecast wind {p.wind_kt * 1.15078:.0f} mph, actual "
+                                f"{p.obs_wind_kt * 1.15078:.0f} mph")
+                    tip = f"<b>{SOURCES[src]}</b> forecast for {when}<br><b>{p.err_mi:.0f} mi off</b>{wind}"
+                else:
+                    tip = f"<b>{SOURCES[src]}</b> forecast for {when}<br>not happened yet"
+                folium.CircleMarker([p.lat, p.lon], radius=4.5 if p.verified else 3, color="white", weight=1.5,
+                                    fill=True, fill_color=color, fill_opacity=1 if p.verified else 0.6,
+                                    tooltip=tip).add_to(layer)
+            all_lat += list(df["lat"])
+            all_lon += list(df["lon"])
+
+    layer = folium.FeatureGroup(name=f"Actual track ({obs.attrs.get('source', 'observed')})").add_to(m)
+    folium.PolyLine(obs_u[["lat", "lon"]].values.tolist(), color=OBS_COLOR, weight=4).add_to(layer)
+    for row in obs_u.dropna(subset=["wind_kt"]).itertuples():
+        folium.CircleMarker([row.lat, row.lon], radius=5, color="white", weight=1.5, fill=True,
+                            fill_color=OBS_COLOR, fill_opacity=1, tooltip=_point_tooltip(row, "Actual")).add_to(layer)
+
+    folium.LayerControl(collapsed=False).add_to(m)
+    if all_lat:
+        m.fit_bounds([[min(all_lat) - 1, min(all_lon) - 1.5], [max(all_lat) + 1, max(all_lon) + 1.5]])
+    return fig
+
+
+HISTORY_INTRO = """<p>The <b style="color:#eb6834">orange line</b> is where the storm actually went. Pick a forecast time
+in the box at top right to see what <b style="color:#2a78d6">WeatherNext 3</b>, the
+<b style="color:#16956a">operational model</b> and <b>NHC</b> (black) predicted back then. Solid parts have already
+happened, and the thin gray dashes connect each forecast point to where the storm really was at that moment, so
+longer dashes mean bigger misses. Dotted parts are still in the future. Hover any dot for the exact miss.
+The WeatherNext lines are the ensemble averages.</p>"""

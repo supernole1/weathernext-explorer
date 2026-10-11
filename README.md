@@ -27,12 +27,16 @@ For any active storm, worldwide:
   - **your location:** enter a ZIP for a ★ on the map. Hover it to see how far the storm is, where and when
     each model's average track passes closest, and how many of the 64 forecasts bring the center within 50/100 mi
   - the observed track so far (NHC best track, updated each advisory; NOAA IBTrACS outside NHC's area)
+- **How the forecasts did:** a map and scoreboard comparing the WeatherNext 3, operational-model and NHC
+  forecasts made 1–5 days ago with where the storm actually went, in miles off and wind error.
 - **Wind-speed chart:** all 64 intensity forecasts against NHC's official intensity forecast.
 - **Accuracy charts:** how far off earlier runs were, by forecast length, once the storm has a track history.
 - **Refresh everything button:** pulls the newest runs, advisory and radar with one click.
 - **Share button:** sends a snapshot of the report through your device's share menu (email, text,
   WhatsApp, Nearby Share). The recipient just opens the file in a browser, with nothing to install. The shared
   copy is kept free of anything email virus scanners object to, so Gmail accepts it as an attachment.
+- **Local forecast for your ZIP:** 16-day outlook from the 64-member WeatherNext 2 ensemble (via Open-Meteo):
+  temperature, wind and rain ranges, daily cards, and the chance of rain each day.
 - Built-in explainers: what WeatherNext 3 is, how DeepMind's AI forecasting works, and how to read the map.
 
 No accounts or API keys are needed. Every data source is free and public.
@@ -52,7 +56,9 @@ during the install.
 
    The first run sets everything up automatically, which takes about a minute.
 3. It lists the active storms. Type a storm ID (e.g. `AL092026`) and the report opens in your browser.
-   Type `M` for a map of all storms, or `Q` to quit.
+   Type `M` for a map of all storms, `F` for your local forecast, or `Q` to quit.
+
+   You can open a second window (double-click again) to keep a storm and your local forecast up side by side.
 
 **Keep the black window / terminal open while you view reports.** It runs a small local helper on
 `http://127.0.0.1:8913` that powers the Refresh button. Nothing is exposed outside your computer.
@@ -76,13 +82,14 @@ Press **Refresh everything** to pick up whatever is newest.
 | [Google DeepMind Weather Lab](https://deepmind.google.com/science/weatherlab) | WeatherNext cyclone tracks and intensity, ensemble mean and all members, 2024 to now | `wnx/weatherlab.py` |
 | [NHC CurrentStorms.json](https://www.nhc.noaa.gov/CurrentStorms.json) + public advisories | Current conditions, official cone, track, intensity forecast, watches and warnings | `wnx/nhc.py` |
 | [NHC best track (ATCF b-deck)](https://ftp.nhc.noaa.gov/atcf/btk/) | Observed track, updated with each advisory | `wnx/observed.py` |
+| [NHC forecast aids (ATCF a-deck)](https://ftp.nhc.noaa.gov/atcf/aid_public/) | Past NHC official forecasts, for the "How the forecasts did" comparison | `wnx/nhc.py`, `wnx/history.py` |
 | [NOAA IBTrACS](https://www.ncei.noaa.gov/products/international-best-track-archive) | Observed tracks outside NHC's area (runs about a day behind) | `wnx/ibtracs.py` |
 | [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/) | Live US NEXRAD radar mosaic; airport (ASOS) wind observations | `wnx/maps.py`, `wnx/windobs.py` |
 | [NOAA NDBC](https://www.ndbc.noaa.gov/) | Buoy and coastal-station wind, pressure and waves | `wnx/windobs.py` |
 | [Zippopotam.us](https://zippopotam.us/) | ZIP code → map location for the ★ (looked up once, then saved in your browser) | `wnx/static/my_location.js` |
 | [NOAA nowCOAST](https://nowcoast.noaa.gov/) | Live global infrared satellite | `wnx/maps.py` |
 | [Esri](https://www.esri.com/) | Street, topographic and light-gray base maps | `wnx/maps.py` |
-| [Open-Meteo](https://open-meteo.com/en/docs/google-weathernext-api) | Point forecasts from the WeatherNext 2 ensemble (optional script) | `wnx/openmeteo.py` |
+| [Open-Meteo](https://open-meteo.com/en/docs/google-weathernext-api) | Local forecast page and point forecasts from the WeatherNext 2 ensemble | `wnx/forecast.py`, `wnx/openmeteo.py` |
 
 Weather Lab model codes: `WNV3` = WeatherNext 3 (64 members), `OPER` = WeatherNext Cyclones operational model
 (50 members), `FNV3P2`/`FNV3P1` = WeatherNext 2 cyclone versions, `FNV3_LARGE_ENSEMBLE` = 1000 members.
@@ -107,6 +114,9 @@ run.bat scripts\storm_report.py AL092026 --latest
 
 # A past storm over a fixed window, e.g. Hurricane Melissa 2025
 run.bat scripts\storm_report.py AL132025 --start 2025-10-21 --end 2025-10-29 --spaghetti 2025-10-25T06
+
+# Local 16-day forecast page for a US ZIP code (WeatherNext 2 ensemble)
+run.bat scripts\my_forecast.py 32578
 
 # 64-member point forecast for any location (WeatherNext 2 via Open-Meteo), e.g. Tampa wind in knots
 run.bat scripts\point_forecast.py 27.95 -82.46 --var wind_speed_10m

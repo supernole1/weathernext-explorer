@@ -13,9 +13,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from wnx import about, maps, nhc, observed, plots, verify, weatherlab  # noqa: E402
+from wnx import about, history, maps, nhc, observed, plots, verify, weatherlab  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def history_section(storm: str, name: str, obs) -> list:
+    """'How the forecasts did' map + scoreboard, comparing past forecasts with the observed track."""
+    if obs.empty:
+        return []
+    print("Comparing past forecasts with the actual track...")
+    runs = history.gather(storm, obs)
+    if not runs:
+        return []
+    return [f"<h3 style='margin-top:28px'>How the forecasts did: {name}</h3>", maps.HISTORY_INTRO,
+            maps.history_map(obs, runs), history.scoreboard_html(runs, name)]
 
 
 def main() -> None:
@@ -89,6 +101,7 @@ def main() -> None:
         "switch base maps or hide layers. County lines show for the US.</p>",
         maps.track_map(members_first, spag_means, obs, official=[official]),
         maps.HOW_TO_READ,
+        *history_section(storm, name, obs),
         plots.intensity_plume(members_first, spag_means, obs,
                               f"{name}: forecast max wind ({runs})", official),
     ]

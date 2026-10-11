@@ -7,6 +7,7 @@ opens it in your browser. Keep the window open while you use the Refresh button;
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -28,7 +29,31 @@ def command_for(page: str) -> list[str] | None:
         return [PY, str(ROOT / "scripts" / "storm_report.py"), m.group(1), "--latest"]
     if m := re.fullmatch(r"active_storms_(\w+)\.html", page):
         return [PY, str(ROOT / "scripts" / "active_storms.py"), "--model", m.group(1)]
+    if m := re.fullmatch(r"forecast_(\d{5})\.html", page):
+        return [PY, str(ROOT / "scripts" / "my_forecast.py"), m.group(1)]
     return None
+
+
+ZIP_FILE = ROOT / "data" / "my_zip.txt"   # remembered between sessions (data/ is not in git)
+
+
+def open_forecast(base: str) -> None:
+    saved = ZIP_FILE.read_text().strip() if ZIP_FILE.exists() else ""
+    prompt = f"ZIP code for your forecast [{saved}]: " if saved else "ZIP code for your forecast: "
+    zip_code = input(prompt).strip() or saved
+    if not re.fullmatch(r"\d{5}", zip_code):
+        print("Please enter a 5-digit US ZIP code.")
+        return
+    print(f"Building forecast for {zip_code}...", flush=True)
+    result = run(command_for(f"forecast_{zip_code}.html"))
+    if result.returncode != 0:
+        print((result.stderr or result.stdout).strip().splitlines()[-1])
+        return
+    ZIP_FILE.parent.mkdir(exist_ok=True)
+    ZIP_FILE.write_text(zip_code)
+    print(result.stdout.split("\nForecast written")[0].strip())
+    webbrowser.open(f"{base}/forecast_{zip_code}.html")
+    print(f"\nOpened {base}/forecast_{zip_code}.html")
 
 
 def run(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -36,7 +61,8 @@ def run(cmd: list[str]) -> subprocess.CompletedProcess:
     # can hang at startup on Windows.
     with BUILD_LOCK:
         return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=300,
-                              stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace")
+                              stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace",
+                              env={**os.environ, "PYTHONIOENCODING": "utf-8"})  # e.g. the ° in forecasts
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -73,11 +99,17 @@ class Handler(SimpleHTTPRequestHandler):
         pass
 
 
+class ExclusiveServer(ThreadingHTTPServer):
+    # Python's HTTP server sets SO_REUSEADDR, which on Windows lets a second viewer bind a port that's
+    # already in use, and then requests go to the wrong one. Refuse instead, so we move to the next port.
+    allow_reuse_address = False
+
+
 def start_server(first_port: int = 8913) -> int:
     OUT.mkdir(exist_ok=True)
     for port in range(first_port, first_port + 20):
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(OUT)))
+            server = ExclusiveServer(("127.0.0.1", port), partial(Handler, directory=str(OUT)))
         except OSError:
             continue  # port busy (e.g. another viewer window is open)
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -86,6 +118,7 @@ def start_server(first_port: int = 8913) -> int:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(errors="replace")  # never crash on a character the console can't show
     port = start_server()
     base = f"http://127.0.0.1:{port}"
     print("Checking the latest forecast for active storms...\n", flush=True)
@@ -95,11 +128,15 @@ def main() -> None:
 
     while True:
         print()
-        storm = input("Storm ID to open (e.g. AL092026), M for the all-storms map, Q to quit: ").strip()
+        storm = input("Storm ID to open (e.g. AL092026), M for the all-storms map, "
+                      "F for your local forecast, Q to quit: ").strip()
         if storm.upper() == "Q":
             return
         if storm.upper() == "M":
             webbrowser.open(f"{base}/active_storms_WNV3.html")
+            continue
+        if storm.upper() == "F":
+            open_forecast(base)
             continue
         if not re.fullmatch(r"[A-Za-z]{2}\d{6}", storm):
             print("That doesn't look like a storm ID: two letters and six digits, like AL092026.")

@@ -157,9 +157,24 @@ def saffir_simpson(wind_kt: float, classification: str) -> str:
             if wind_kt >= floor:
                 return f"{cat} hurricane"
         return "Category 1 hurricane"
+    # In CurrentStorms.json "PTC" is a post-tropical cyclone (confirmed against the advisory title).
     return {"TS": "Tropical storm", "TD": "Tropical depression", "STS": "Subtropical storm",
-            "SD": "Subtropical depression", "PTC": "Potential tropical cyclone",
-            "PC": "Post-tropical cyclone"}.get(classification, classification)
+            "STD": "Subtropical depression", "SD": "Subtropical depression", "PTC": "Post-tropical cyclone",
+            "PC": "Potential tropical cyclone"}.get(classification, classification)
+
+
+def _link(storm: dict, product: str, field: str = "kmzFile") -> str | None:
+    """A product link from CurrentStorms.json. NHC sets products to null (not absent) when they're
+    discontinued, e.g. once a storm weakens over land, so treat null, missing and empty alike."""
+    value = (storm.get(product) or {}).get(field)
+    return value or None
+
+
+def _num(value, default: float = float("nan")) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _kml(url: str) -> str:
@@ -199,22 +214,22 @@ def official_forecast(atcf_id: str) -> OfficialForecast | None:
 
     fc = OfficialForecast(
         atcf_id=s["id"].upper(), name=s["name"], classification=s["classification"],
-        advisory=s["publicAdvisory"]["advNum"].upper(),
+        advisory=(_link(s, "publicAdvisory", "advNum") or "").upper(),
         issued=datetime.fromisoformat(s["lastUpdate"].replace("Z", "")),
         current_lat=s["latitudeNumeric"], current_lon=s["longitudeNumeric"],
-        current_wind_kt=float(s["intensity"]), current_mslp_hpa=float(s["pressure"]))
+        current_wind_kt=_num(s.get("intensity")), current_mslp_hpa=_num(s.get("pressure")))
 
-    if s.get("publicAdvisory", {}).get("url"):
-        fc.conditions = _conditions(s["publicAdvisory"]["url"])
+    if _link(s, "publicAdvisory", "url"):
+        fc.conditions = _conditions(_link(s, "publicAdvisory", "url"))
 
     try:
-        if s.get("trackCone"):
-            kml = _kml(s["trackCone"]["kmzFile"])
+        if _link(s, "trackCone"):
+            kml = _kml(_link(s, "trackCone"))
             m = re.search(r"<Polygon>.*?<coordinates>(.*?)</coordinates>", kml, re.S)
             if m:
                 fc.cone = _coords(m.group(1))
-        if s.get("forecastTrack"):
-            kml = _kml(s["forecastTrack"]["kmzFile"])
+        if _link(s, "forecastTrack"):
+            kml = _kml(_link(s, "forecastTrack"))
             for pm in re.findall(r"<Placemark>.*?</Placemark>", kml, re.S):
                 pt = re.search(r"<Point>\s*<coordinates>(.*?)</coordinates>", pm, re.S)
                 if not pt:
@@ -225,8 +240,8 @@ def official_forecast(atcf_id: str) -> OfficialForecast | None:
                 fc.track.append(TrackPoint(
                     lat, lon, (label.group(1).strip() if label else "").replace("Advisory Information", "Now"),
                     _parse_valid(pm), float(wind.group(1)) if wind else None))
-        if s.get("windWatchesWarnings"):
-            kml = _kml(s["windWatchesWarnings"]["kmzFile"])
+        if _link(s, "windWatchesWarnings"):
+            kml = _kml(_link(s, "windWatchesWarnings"))
             for pm in re.findall(r"<Placemark>.*?</Placemark>", kml, re.S):
                 name = re.search(r"<name>(.*?)</name>", pm)
                 for c in re.findall(r"<coordinates>(.*?)</coordinates>", pm, re.S):
@@ -236,8 +251,8 @@ def official_forecast(atcf_id: str) -> OfficialForecast | None:
 
     for key, target in (("initialWindExtent", fc.wind_now), ("forecastWindRadiiGIS", fc.wind_forecast)):
         try:
-            if s.get(key, {}).get("kmzFile"):
-                for pm in re.findall(r"<Placemark>.*?</Placemark>", _kml(s[key]["kmzFile"]), re.S):
+            if _link(s, key):
+                for pm in re.findall(r"<Placemark>.*?</Placemark>", _kml(_link(s, key)), re.S):
                     kt = re.search(r"<name>\s*(\d+)\s*</name>", pm)
                     for ring in re.findall(r"<outerBoundaryIs>.*?<coordinates>(.*?)</coordinates>", pm, re.S):
                         if kt:
@@ -245,8 +260,8 @@ def official_forecast(atcf_id: str) -> OfficialForecast | None:
         except (requests.RequestException, zipfile.BadZipFile, StopIteration, ValueError):
             pass
     try:
-        if s.get("earliestArrivalTimeTSWindsGIS", {}).get("kmzFile"):
-            kml = _kml(s["earliestArrivalTimeTSWindsGIS"]["kmzFile"])
+        if _link(s, "earliestArrivalTimeTSWindsGIS"):
+            kml = _kml(_link(s, "earliestArrivalTimeTSWindsGIS"))
             tz = re.search(r'<Data name="timezone">\s*<value>(\w+)</value>', kml)
             fc.arrival_tz = tz.group(1) if tz else ""
             for pm in re.findall(r"<Placemark>.*?</Placemark>", kml, re.S):
@@ -282,6 +297,11 @@ def conditions_html(fc: OfficialForecast | None) -> str:
                 "or the regional weather agency.</div>")
     c = fc.conditions
     kind = saffir_simpson(fc.current_wind_kt, fc.classification)
+    # Outside hurricanes, trust NHC's own wording from the advisory title ("Post-Tropical Cyclone Isaias ...").
+    if fc.classification != "HU" and c and fc.name in c.title:
+        words = c.title.split(fc.name)[0].strip()
+        if words:
+            kind = words[:1].upper() + words[1:].lower()
     major = " · major hurricane" if kind.startswith(("Category 3", "Category 4", "Category 5")) else ""
     accent = "#d00000" if fc.classification == "HU" else "#1f3c88" if fc.classification in ("TS", "STS") else "#8a8984"
     title = f"{fc.name}: {kind}{major}"
@@ -311,8 +331,11 @@ def conditions_html(fc: OfficialForecast | None) -> str:
             when = fc.issued.replace(tzinfo=timezone.utc).astimezone().strftime("%I:%M %p").lstrip("0")
             where += (f'<div style="margin-top:4px;color:#0b0b0b"><b>Latest NHC position update ({when}):</b> '
                       f"{abs(fc.current_lat):.1f}{'N' if fc.current_lat >= 0 else 'S'} "
-                      f"{abs(fc.current_lon):.1f}{'W' if fc.current_lon < 0 else 'E'} · "
-                      f"{round(fc.current_wind_kt * 1.15078 / 5) * 5:.0f} mph · {fc.current_mslp_hpa:.0f} mb</div>")
+                      f"{abs(fc.current_lon):.1f}{'W' if fc.current_lon < 0 else 'E'}"
+                      + (f" · {round(fc.current_wind_kt * 1.15078 / 5) * 5:.0f} mph"
+                         if fc.current_wind_kt == fc.current_wind_kt else "")       # skip if NaN
+                      + (f" · {fc.current_mslp_hpa:.0f} mb" if fc.current_mslp_hpa == fc.current_mslp_hpa else "")
+                      + "</div>")
     checked = datetime.now().astimezone().strftime("%I:%M %p").lstrip("0")
     nxt = (f" · <b>{' '.join(c.next_advisories)}</b>" if c.next_advisories else "") + \
           f" <span style='color:#8a8984'>(checked NHC at {checked})</span>"
@@ -334,3 +357,47 @@ National Hurricane Center</div>
 <div style="font-size:13px;color:#52514e">{where}</div>{ww}
 <div style="margin-top:10px;font-size:13px"><a href="{c.url}">Read the full NHC advisory &rarr;</a></div>
 </div>"""
+
+
+ADECK_URL = "https://ftp.nhc.noaa.gov/atcf/aid_public/a{basin}{num}{year}.dat.gz"
+
+
+def official_history(atcf_id: str) -> "pd.DataFrame":
+    """Every official NHC forecast (ATCF 'OFCL' aid) issued for a storm so far.
+
+    Columns: init_time, lead_time_hours, valid_time, lat, lon, wind_kt (all times UTC, naive).
+    The a-deck file holds every forecast aid; OFCL is NHC's official forecast, keyed to the synoptic
+    time (00/06/12/18Z) it was based on, issued ~3 h later. Empty outside NHC's basins.
+    """
+    import gzip
+
+    import pandas as pd
+
+    basin, num, year = atcf_id[:2].lower(), atcf_id[2:4], atcf_id[4:]
+    if basin not in ("al", "ep", "cp"):
+        return pd.DataFrame()
+    try:
+        resp = requests.get(ADECK_URL.format(basin=basin, num=num, year=year), headers=HEADERS, timeout=60)
+        resp.raise_for_status()
+        text = gzip.decompress(resp.content).decode("utf-8", errors="replace")
+    except (requests.RequestException, OSError):
+        return pd.DataFrame()
+
+    def coord(v: str) -> float:
+        x = int(v[:-1]) / 10
+        return -x if v[-1] in "SW" else x
+
+    rows = []
+    for line in text.splitlines():
+        f = [x.strip() for x in line.split(",")]
+        if len(f) < 9 or f[4] != "OFCL" or not f[6] or not f[7]:
+            continue
+        init = datetime.strptime(f[2], "%Y%m%d%H")
+        tau = int(f[5])
+        rows.append({"init_time": init, "lead_time_hours": tau, "valid_time": init + timedelta(hours=tau),
+                     "lat": coord(f[6]), "lon": coord(f[7]), "wind_kt": float(f[8]) if f[8] else None})
+    if not rows:
+        return pd.DataFrame()
+    # One row per wind-radii threshold at each forecast hour; keep one.
+    return (pd.DataFrame(rows).drop_duplicates(["init_time", "lead_time_hours"])
+            .sort_values(["init_time", "lead_time_hours"]).reset_index(drop=True))
