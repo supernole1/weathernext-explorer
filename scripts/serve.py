@@ -29,6 +29,8 @@ def command_for(page: str) -> list[str] | None:
         return [PY, str(ROOT / "scripts" / "storm_report.py"), m.group(1), "--latest"]
     if m := re.fullmatch(r"active_storms_(\w+)\.html", page):
         return [PY, str(ROOT / "scripts" / "active_storms.py"), "--model", m.group(1)]
+    if page == "gulf_outlook.html":
+        return [PY, str(ROOT / "scripts" / "gulf_outlook.py")]
     if m := re.fullmatch(r"forecast_(\d{5})\.html", page):
         return [PY, str(ROOT / "scripts" / "my_forecast.py"), m.group(1)]
     return None
@@ -56,11 +58,22 @@ def open_forecast(base: str) -> None:
     print(f"\nOpened {base}/forecast_{zip_code}.html")
 
 
+def open_page(base: str, page: str, message: str, split: str) -> None:
+    print(message, flush=True)
+    result = run(command_for(page))
+    if result.returncode != 0:
+        print((result.stderr or result.stdout).strip().splitlines()[-1])
+        return
+    print(result.stdout.split(split)[0].strip())
+    webbrowser.open(f"{base}/{page}")
+    print(f"\nOpened {base}/{page}")
+
+
 def run(cmd: list[str]) -> subprocess.CompletedProcess:
     # stdin=DEVNULL: the main thread sits in input(), and a child that inherits that same stdin
     # can hang at startup on Windows.
     with BUILD_LOCK:
-        return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=300,
+        return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=600,
                               stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace",
                               env={**os.environ, "PYTHONIOENCODING": "utf-8"})  # e.g. the ° in forecasts
 
@@ -129,11 +142,15 @@ def main() -> None:
     while True:
         print()
         storm = input("Storm ID to open (e.g. AL092026), M for the all-storms map, "
-                      "F for your local forecast, Q to quit: ").strip()
+                      "F for your local forecast,\n  G for the 15-day Gulf tropical outlook, Q to quit: ").strip()
         if storm.upper() == "Q":
             return
         if storm.upper() == "M":
             webbrowser.open(f"{base}/active_storms_WNV3.html")
+            continue
+        if storm.upper() == "G":
+            open_page(base, "gulf_outlook.html", "Building the 15-day Gulf outlook (first time takes a few minutes)...",
+                      "\nOutlook written")
             continue
         if storm.upper() == "F":
             open_forecast(base)

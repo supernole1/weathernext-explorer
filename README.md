@@ -37,6 +37,9 @@ For any active storm, worldwide:
   copy is kept free of anything email virus scanners object to, so Gmail accepts it as an attachment.
 - **Local forecast for your ZIP:** 16-day outlook from the 64-member WeatherNext 2 ensemble (via Open-Meteo):
   temperature, wind and rain ranges, daily cards, and the chance of rain each day.
+- **15-day Gulf tropical outlook:** the chance that a tropical storm forms in the Gulf of America or NW Caribbean,
+  by day, from all 64 WeatherNext 2 forecasts, with a map of where the forecast storms form and go next to
+  NHC's official 7-day outlook areas.
 - Built-in explainers: what WeatherNext 3 is, how DeepMind's AI forecasting works, and how to read the map.
 
 No accounts or API keys are needed. Every data source is free and public.
@@ -56,7 +59,7 @@ during the install.
 
    The first run sets everything up automatically, which takes about a minute.
 3. It lists the active storms. Type a storm ID (e.g. `AL092026`) and the report opens in your browser.
-   Type `M` for a map of all storms, `F` for your local forecast, or `Q` to quit.
+   Type `M` for a map of all storms, `F` for your local forecast, `G` for the Gulf tropical outlook, or `Q` to quit.
 
    You can open a second window (double-click again) to keep a storm and your local forecast up side by side.
 
@@ -89,7 +92,8 @@ Press **Refresh everything** to pick up whatever is newest.
 | [Zippopotam.us](https://zippopotam.us/) | ZIP code → map location for the ★ (looked up once, then saved in your browser) | `wnx/static/my_location.js` |
 | [NOAA nowCOAST](https://nowcoast.noaa.gov/) | Live global infrared satellite | `wnx/maps.py` |
 | [Esri](https://www.esri.com/) | Street, topographic and light-gray base maps | `wnx/maps.py` |
-| [Open-Meteo](https://open-meteo.com/en/docs/google-weathernext-api) | Local forecast page and point forecasts from the WeatherNext 2 ensemble | `wnx/forecast.py`, `wnx/openmeteo.py` |
+| [Open-Meteo](https://open-meteo.com/en/docs/google-weathernext-api) | Local forecast page, Gulf tropical outlook and point forecasts from the WeatherNext 2 ensemble | `wnx/forecast.py`, `wnx/gulf.py`, `wnx/openmeteo.py` |
+| [NHC Tropical Weather Outlook](https://www.nhc.noaa.gov/gtwo.php?basin=atlc) | Official 2- and 7-day formation chances and outlined areas | `wnx/gulf.py` |
 
 Weather Lab model codes: `WNV3` = WeatherNext 3 (64 members), `OPER` = WeatherNext Cyclones operational model
 (50 members), `FNV3P2`/`FNV3P1` = WeatherNext 2 cyclone versions, `FNV3_LARGE_ENSEMBLE` = 1000 members.
@@ -114,6 +118,9 @@ run.bat scripts\storm_report.py AL092026 --latest
 
 # A past storm over a fixed window, e.g. Hurricane Melissa 2025
 run.bat scripts\storm_report.py AL132025 --start 2025-10-21 --end 2025-10-29 --spaghetti 2025-10-25T06
+
+# 15-day tropical outlook for the Gulf of America and NW Caribbean
+run.bat scripts\gulf_outlook.py
 
 # Local 16-day forecast page for a US ZIP code (WeatherNext 2 ensemble)
 run.bat scripts\my_forecast.py 32578
