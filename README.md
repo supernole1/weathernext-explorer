@@ -42,7 +42,10 @@ For any active storm, worldwide:
   NHC's official 7-day outlook areas.
 - **Winter outlook for your ZIP:** NOAA's official 3-month outlooks at your location, the current El Niño /
   La Niña status, and the 51-member ECMWF seasonal forecast month by month (temperature and rain vs normal, and the
-  share of forecasts warmer or wetter), with collapsible explainers on how seasonal outlooks work.
+  share of forecasts warmer or wetter), with collapsible explainers on how seasonal outlooks work. Includes a
+  **polar vortex watch** (ECMWF's 51-member 15-day forecast of the 10 hPa wind at 60°N, with a plain-language
+  status) and a table of when each official source updates.
+- Every page has an **Acronyms** button (bottom right) that pops up the abbreviations used on that page.
 - Built-in explainers: what WeatherNext 3 is, how DeepMind's AI forecasting works, and how to read the map.
 
 No accounts or API keys are needed. Every data source is free and public.
@@ -97,6 +100,7 @@ Press **Refresh everything** to pick up whatever is newest.
 | [Esri](https://www.esri.com/) | Street, topographic and light-gray base maps | `wnx/maps.py` |
 | [Open-Meteo](https://open-meteo.com/en/docs/google-weathernext-api) | Local forecast page, Gulf tropical outlook and point forecasts from the WeatherNext 2 ensemble | `wnx/forecast.py`, `wnx/gulf.py`, `wnx/openmeteo.py` |
 | [Open-Meteo seasonal API](https://open-meteo.com/en/docs/seasonal-forecast-api) | ECMWF SEAS5 seasonal forecast, 51 members, ~7 months | `wnx/seasonal.py` |
+| [Open-Meteo ensemble API](https://open-meteo.com/en/docs/ensemble-api) | ECMWF ensemble 10 hPa winds around 60°N for the polar vortex watch | `wnx/vortex.py` |
 | [NOAA Climate Prediction Center](https://www.cpc.ncep.noaa.gov/) | Official 3-month outlooks and El Niño / La Niña status | `wnx/seasonal.py` |
 | [NHC Tropical Weather Outlook](https://www.nhc.noaa.gov/gtwo.php?basin=atlc) | Official 2- and 7-day formation chances and outlined areas | `wnx/gulf.py` |
 

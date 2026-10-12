@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -16,7 +17,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import plotly.graph_objects as go  # noqa: E402
 
-from wnx import forecast, plots, seasonal  # noqa: E402
+from wnx import forecast, plots, seasonal, vortex  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 INK, INK_2, GRID = "#0b0b0b", "#52514e", "#e6e5e0"
@@ -169,6 +170,106 @@ def noaa_section(cpc: pd.DataFrame, created: str) -> str:
             f"<th style='text-align:left'>Rain</th></tr>{''.join(rows)}</table>{maps}")
 
 
+def vortex_section(u: pd.DataFrame, data: dict) -> list:
+    """Polar vortex watch: status tile, 51-forecast chart and explainer."""
+    s = vortex.status(u)
+    color = {"cold": COOL, "watch": "#e3a72f", "warm": WARM, "neutral": NEUTRAL}[s["color"]]
+    if s["first_rev"] is not None:
+        when = f"Median first reversal in those forecasts: {s['first_rev']:%b} {s['first_rev'].day}."
+        impact = ("If it happens, the effects at the ground usually show up 1–4 weeks later: about two-thirds of the "
+                  "time the eastern US turns colder than normal, and on the Gulf Coast that can mean a hard freeze. "
+                  "Watch the local forecast (F in the viewer) over the following weeks.")
+    else:
+        when, impact = "", ("No sign of a disruption in the next 15 days, so no vortex-driven Arctic outbreak is "
+                            "expected for at least the next 3–4 weeks. Ordinary cold fronts can still bring cold snaps.")
+    run = ""
+    if data.get("run"):
+        r = datetime.fromtimestamp(data["run"], timezone.utc)
+        run = f"ECMWF run of {r:%b} {r.day}, {r:%H}:00 UTC"
+        if data.get("available"):
+            run += f", published {(data['available'] - data['run']) / 3600:.0f} hours later"
+    box = (f"<div style='border-left:4px solid {color};background:#fff;padding:10px 14px;margin:12px 0'>"
+           f"<div style='font-size:13px;color:{INK_2}'>Polar vortex, forecast through {u.index[-1]:%b} {u.index[-1].day}</div>"
+           f"<div style='font-size:24px;font-weight:700;color:{INK};margin:2px 0'>"
+           f"<span style='color:{color}'>●</span> {s['label']}</div>"
+           f"<div>{s['text']} {when}</div>"
+           f"<div style='margin-top:6px'>{impact if s['label'] not in ('Summer pattern', 'Seasonal change') else ''}</div>"
+           f"<div style='font-size:12px;color:{INK_2};margin-top:6px'>Vortex wind now {s['now']:.0f} m/s "
+           f"(normal about {s['normal_now']:.0f}). {run}.</div></div>")
+
+    fig = go.Figure()
+    days = u.index
+    for i, col in enumerate(u.columns):
+        fig.add_scatter(x=days, y=u[col], mode="lines", line=dict(color="rgba(42,120,214,0.22)", width=1),
+                        name="Each of the 51 forecasts", legendgroup="m", showlegend=i == 0, hoverinfo="skip")
+    fig.add_scatter(x=days, y=[vortex.normal(t) for t in days], mode="lines", name="Approximate normal",
+                    line=dict(color=NEUTRAL, width=2, dash="dash"), hovertemplate="normal ≈ %{y:.0f} m/s<extra></extra>")
+    fig.add_scatter(x=days, y=u.mean(axis=1), mode="lines", name="Average of the 51 forecasts",
+                    line=dict(color=COOL, width=3), hovertemplate="average %{y:.0f} m/s<extra></extra>")
+    fig.add_hline(y=0, line=dict(color=INK, width=1))
+    fig.add_annotation(x=1, xref="paper", y=0, text="below this line = disrupted (winds reversed)", showarrow=False,
+                       xanchor="right", yanchor="top", font=dict(color=INK_2, size=11))
+    top = max(40, float(u.max().max()) + 5)
+    bottom = min(-10, float(u.min().min()) - 5)
+    plots._style(fig, "Polar vortex strength: west-to-east wind 19 miles up, around 60°N").update_layout(
+        height=380, yaxis=dict(title="Wind (m/s, westerly)", range=[bottom, top]), hovermode="x unified",
+        legend=dict(orientation="h", y=-0.18))
+
+    explain = details("What is the polar vortex, and why it matters here", """
+<p>Every fall a ring of strong west-to-east winds forms high above the Arctic, in the <b>stratosphere</b> (10–30
+miles up). This is the <b>polar vortex</b>. While it's strong, it tends to keep the coldest air locked near the
+pole.</p>
+<p>A few times a decade, usually in January or February, waves from the lower atmosphere slam into it and it
+weakens, splits, or even reverses. The air up there warms by 50°F or more in a few days, which is why this is called
+a <b>sudden stratospheric warming</b>. Over the next 1–4 weeks the effect can work its way down: the jet stream buckles,
+and Arctic air spills south into the US, Europe or Asia. Not every warming does this (roughly two in three do), and
+where the cold goes varies.</p>
+<p>On the Gulf Coast, the famous cold outbreaks often followed a vortex disruption: the January 2021 warming came
+before the February 2021 freeze in Texas and the Gulf states. Strong El Niño winters like this one tend to have a
+weaker vortex and more disruptions, slightly raising the odds.</p>
+<p><b>How it's measured:</b> the standard number is the west-to-east wind at the 10 hPa pressure level (about 19
+miles up), averaged all the way around 60°N, roughly the latitude of Anchorage and Oslo. Normal in midwinter is
+about 30–35 m/s (70–80 mph). Below zero between November and March counts as a disruption.</p>
+<p><b>Limits:</b> models can usually see a disruption coming only 1–2 weeks ahead, so this is an early-warning
+tool, not a seasonal forecast. The "normal" line is an approximate long-term average (good to about ±5 m/s), because
+the free data source has no past stratospheric data to compute it exactly. In April the vortex breaks up every year
+(the "final warming"), which is normal and doesn't count.</p>
+<p><b>Where this comes from:</b> the 51-member ECMWF ensemble via <a href="https://open-meteo.com/en/docs/ensemble-api">Open-Meteo</a>,
+at 24 points around 60°N. WeatherNext stops at the 50 hPa level, below the vortex, so it can't be used here. For
+expert commentary, see NOAA's <a href="https://www.climate.gov/news-features/blogs/polar-vortex">Polar Vortex blog</a>;
+for detailed stratosphere forecast charts, <a href="https://stratobserve.com/">StratObserve</a>.</p>""")
+    return ["<h3>Polar vortex watch</h3><p>The polar vortex can't be predicted for the whole winter, but a disruption "
+            "can be seen 1–2 weeks ahead, and its effects reach the ground 1–4 weeks after that. Each thin line is one "
+            "of ECMWF's 51 forecasts.</p>", box, fig, explain]
+
+
+def update_schedule(enso: dict) -> str:
+    """When each official source behind this page (and related ones) publishes new information."""
+    rows = [
+        ("ECMWF ensemble (polar vortex chart)", "4 times a day (00, 06, 12, 18 UTC; the 00 and 12 UTC runs go "
+         "out 15 days). Usually reaches Open-Meteo 7–11 hours after the run starts, occasionally later; the page shows which run it used. This page re-downloads it after 6 hours.",
+         "https://open-meteo.com/en/docs/ensemble-api"),
+        ("NOAA Polar Vortex blog", "Not on a schedule: a post every few weeks in winter, more often around a "
+         "disruption; rarely in summer.", "https://www.climate.gov/news-features/blogs/polar-vortex"),
+        ("NOAA El Niño / La Niña discussion", "Monthly, on the second Thursday"
+         + (f" (next: {enso['next']})" if enso.get("next") else "") + ".", seasonal.ENSO_URL),
+        ("NOAA 3-month outlooks (this page's NOAA section)", "Monthly, on the third Thursday.",
+         seasonal.CPC_PAGE.format(lead=1)),
+        ("ECMWF seasonal forecast (SEAS5)", "Monthly, around the 5th. This page re-downloads after 12 hours.",
+         "https://open-meteo.com/en/docs/seasonal-forecast-api"),
+        ("NOAA 6–10 and 8–14 day outlooks", "Daily, 3–4 pm Eastern.",
+         "https://www.cpc.ncep.noaa.gov/products/predictions/814day/"),
+        ("NOAA week 3–4 outlook", "Weekly, Fridays 3–4 pm Eastern.", "https://www.cpc.ncep.noaa.gov/products/predictions/WK34/"),
+        ("NOAA Arctic Oscillation index and forecast", "Daily. A strongly negative AO often follows a vortex "
+         "disruption and goes with cold in the eastern US.",
+         "https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/ao.shtml"),
+    ]
+    body = "".join(f"<tr><td style='text-align:left'><a href='{url}'>{name}</a></td><td style='text-align:left'>{when}</td></tr>"
+                   for name, when, url in rows)
+    return details("When each source updates", "<table><tr><th style='text-align:left'>Source</th>"
+                   f"<th style='text-align:left'>New information</th></tr>{body}</table>")
+
+
 def details(summary: str, body: str) -> str:
     return (f"<details style='border:1px solid {GRID};border-radius:8px;padding:10px 18px;margin:10px 0;background:#fff'>"
             f"<summary style='cursor:pointer;font-weight:600'>{summary}</summary>"
@@ -273,6 +374,16 @@ def main() -> None:
                      "Rain vs normal (monthly total)", " in", WET, DRY, "wetter", "drier"),
         month_table(m),
     ]
+    try:
+        vdata = vortex.fetch()
+        u = vortex.zonal_wind(vdata)
+        s = vortex.status(u)
+        print(f"  Polar vortex: {s['label']} ({s['now']:.0f} m/s now, {s['n_rev']} of {s['n']} forecasts reverse it)")
+        figs += vortex_section(u, vdata)
+    except Exception as e:   # the rest of the page is still useful without it
+        print(f"  Polar vortex: unavailable ({e})")
+        figs.append(f"<h3>Polar vortex watch</h3><p>The vortex forecast couldn't be downloaded this time ({e}).</p>")
+    figs.append(update_schedule(enso))
     out = plots.write_report(
         figs, ROOT / "outputs" / f"winter_{loc['zip']}.html", f"Winter outlook for {loc['place']} ({loc['zip']})",
         notes="NOAA Climate Prediction Center outlooks and El Niño status, plus the 51-member ECMWF seasonal "

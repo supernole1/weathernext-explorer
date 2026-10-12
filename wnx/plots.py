@@ -9,6 +9,8 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 
+from . import glossary
+
 # Fixed categorical order: color follows the model, never its rank.
 MODEL_COLORS = {"WNV3": "#2a78d6", "OPER": "#1baf7a", "FNV3P2": "#eda100",
                 "FNV3P1": "#e87ba4", "FNV3_LARGE_ENSEMBLE": "#4a3aa7"}
@@ -175,14 +177,16 @@ def inline_map(fig, height: int = 650) -> str:
 
 
 def _page(heading: str, bar: str, notes: str, body: str, table_html: str) -> str:
+    content = (f"<p>{notes}</p>{body}{table_html}"
+               '<p style="font-size:12px">Forecast data: Google DeepMind Weather Lab (CC BY 4.0 for data &gt;48h old). '
+               "Observed tracks: NHC best track, or NOAA IBTrACS outside NHC's area. NHC data: NOAA. "
+               "Not an official forecast.</p>")
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{heading}</title>
 <style>body{{font-family:system-ui,sans-serif;background:{SURFACE};color:{INK};max-width:1100px;
 margin:0 auto;padding:16px}} p,li{{color:{INK_2}}} table{{border-collapse:collapse;font-size:13px}}
 td,th{{padding:4px 10px;border-bottom:1px solid {GRID};text-align:right}}</style></head><body>
-<h1>{heading}</h1>{bar}<p>{notes}</p>{body}{table_html}
-<p style="font-size:12px">Forecast data: Google DeepMind Weather Lab (CC BY 4.0 for data &gt;48h old).
-Observed tracks: NHC best track, or NOAA IBTrACS outside NHC's area. NHC data: NOAA. Not an official forecast.</p></body></html>"""
+<h1>{heading}</h1>{bar}{content}{glossary.popup(heading + content)}</body></html>"""
 
 
 def write_report(figs: list, path: Path, heading: str, notes: str = "",
