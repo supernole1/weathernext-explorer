@@ -32,11 +32,12 @@ def _interp_obs(obs: pd.DataFrame, times: pd.Series) -> pd.DataFrame:
     return pd.DataFrame(out, index=times.index)
 
 
-def gather(storm: str, obs: pd.DataFrame, lags=LAGS) -> list[dict]:
-    """For each lag: the three forecasts made that long before the latest observation, with errors."""
+def gather(storm: str, obs: pd.DataFrame, lags=LAGS, anchor=None) -> list[dict]:
+    """For each lag: the three forecasts made that long before `anchor` (default: the latest observation),
+    with errors. For a finished storm the anchor is usually landfall."""
     if obs.empty:
         return []
-    latest = obs["valid_time"].max()
+    latest = pd.Timestamp(anchor) if anchor is not None else obs["valid_time"].max()
     first = obs["valid_time"].min()
     official = nhc.official_history(storm)
     runs = []
@@ -65,7 +66,24 @@ def gather(storm: str, obs: pd.DataFrame, lags=LAGS) -> list[dict]:
     return runs
 
 
-def scoreboard_html(runs: list[dict], name: str) -> str:
+def _at(df: pd.DataFrame, t: pd.Timestamp) -> pd.DataFrame:
+    """The forecast row valid at time t, interpolated between forecast points if t falls between them."""
+    exact = df[df["valid_time"] == t]
+    if not exact.empty or not df["verified"].any():
+        return exact
+    before, after = df[df["valid_time"] < t].tail(1), df[df["valid_time"] > t].head(1)
+    if before.empty or after.empty:
+        return exact
+    w = (t - before["valid_time"].iloc[0]) / (after["valid_time"].iloc[0] - before["valid_time"].iloc[0])
+    row = before.iloc[0].copy()
+    for col in ("lat", "lon", "wind_kt", "obs_lat", "obs_lon", "obs_wind_kt"):
+        row[col] = before[col].iloc[0] + w * (after[col].iloc[0] - before[col].iloc[0])
+    row["valid_time"] = t
+    row["err_mi"] = float(great_circle_km(row["lat"], row["lon"], row["obs_lat"], row["obs_lon"])) * MI_PER_KM
+    return pd.DataFrame([row])
+
+
+def scoreboard_html(runs: list[dict], name: str, anchor_label: str = "") -> str:
     """Table: for each forecast time, how far each source's forecast was from the latest observed position,
     plus the average miss over all verified points."""
     if not runs:
@@ -80,7 +98,7 @@ def scoreboard_html(runs: list[dict], name: str) -> str:
             if df is None:
                 cells.append("<td style='color:#8a8984'>n/a</td>")
                 continue
-            at_latest = df[df["valid_time"] == latest]
+            at_latest = _at(df, latest)
             miss = f"{at_latest['err_mi'].iloc[0]:.0f} mi" if not at_latest.empty and pd.notna(at_latest["err_mi"].iloc[0]) else "–"
             avg = df.loc[df["verified"] & (df["lead_time_hours"] > 0), "err_mi"].mean()
             wind = ""
@@ -92,7 +110,7 @@ def scoreboard_html(runs: list[dict], name: str) -> str:
         rows.append(f"<tr><td style='text-align:left'><b>{r['lag']} h before</b><br>"
                     f"<span style='color:#52514e'>{r['init']:%a %b %d %HZ}</span></td>{''.join(cells)}</tr>")
     return (f"<h3>Scoreboard: how far off each forecast was</h3>"
-            f"<p>Big number: distance between the forecast position and where {name} actually was at its latest "
-            f"observed position ({latest:%a %b %d %HZ}). \"wind\" is the forecast minus the actual max sustained wind at that time. "
+            f"<p>Big number: distance between the forecast position and where {name} actually was "
+            f"{anchor_label or 'at its latest observed position'} ({latest:%a %b %d %HZ}). \"wind\" is the forecast minus the actual max sustained wind at that time. "
             f"\"avg\" is the average miss over every forecast point that has already happened. Smaller is better.</p>"
             f"<table><tr><th style='text-align:left'>Forecast made</th>{head}</tr>{''.join(rows)}</table>")

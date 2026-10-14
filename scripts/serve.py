@@ -29,6 +29,8 @@ def command_for(page: str) -> list[str] | None:
         return [PY, str(ROOT / "scripts" / "storm_report.py"), m.group(1), "--latest"]
     if m := re.fullmatch(r"active_storms_(\w+)\.html", page):
         return [PY, str(ROOT / "scripts" / "active_storms.py"), "--model", m.group(1)]
+    if page == "storm_list.html":
+        return [PY, str(ROOT / "scripts" / "storm_list.py")]
     if page == "gulf_outlook.html":
         return [PY, str(ROOT / "scripts" / "gulf_outlook.py")]
     if m := re.fullmatch(r"forecast_(\d{5})\.html", page):
@@ -139,10 +141,14 @@ def main() -> None:
 
     while True:
         print()
-        storm = input("Storm ID to open (e.g. AL092026), M for the all-storms map, "
-                      "F for your local forecast,\n  G for the 15-day Gulf tropical outlook, W for your winter outlook, Q to quit: ").strip()
+        storm = input("Storm ID to open (e.g. AL092026), L for a list of this season's storms, M for the all-storms map,\n"
+                      "  F for your local forecast, G for the 15-day Gulf tropical outlook, W for your winter outlook, "
+                      "Q to quit: ").strip()
         if storm.upper() == "Q":
             return
+        if storm.upper() == "L":
+            open_page(base, "storm_list.html", "Loading this season's storms...", "\nList written")
+            continue
         if storm.upper() == "M":
             webbrowser.open(f"{base}/active_storms_WNV3.html")
             continue

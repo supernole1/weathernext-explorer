@@ -29,6 +29,9 @@ For any active storm, worldwide:
   - the observed track so far (NHC best track, updated each advisory; NOAA IBTrACS outside NHC's area)
 - **How the forecasts did:** a map and scoreboard comparing the WeatherNext 3, operational-model and NHC
   forecasts made 1–5 days ago with where the storm actually went, in miles off and wind error.
+- **Finished storms:** pick a past storm from the `L` list, or enter its ID (e.g. AL092026), to get a review instead: every forecast made during
+  its life against the actual track, the estimated landfall (place, time, wind), and a scoreboard of how far off
+  each forecast was at landfall.
 - **Wind-speed chart:** all 64 intensity forecasts against NHC's official intensity forecast.
 - **Accuracy charts:** how far off earlier runs were, by forecast length, once the storm has a track history.
 - **Refresh everything button:** pulls the newest runs, advisory and radar with one click.
@@ -65,7 +68,7 @@ during the install.
 
    The first run sets everything up automatically, which takes about a minute.
 3. It lists the active storms. Type a storm ID (e.g. `AL092026`) and the report opens in your browser.
-   Type `M` for a map of all storms, `F` for your local forecast, `G` for the Gulf tropical outlook, `W` for your winter outlook, or `Q` to quit.
+   Type `L` for a clickable list of this season's storms (active and finished), `M` for a map of all storms, `F` for your local forecast, `G` for the Gulf tropical outlook, `W` for your winter outlook, or `Q` to quit.
 
    You can open a second window (double-click again) to keep a storm and your local forecast up side by side.
 

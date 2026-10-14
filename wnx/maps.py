@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import folium
+import numpy as np
 import pandas as pd
 import requests
 
@@ -371,7 +372,8 @@ apart. The legend box shows each one's time, and newer generally beats older.</l
 HISTORY_COLORS = {"WNV3": MODEL_COLORS["WNV3"], "OPER": MODEL_COLORS["OPER"], "NHC": "#0b0b0b"}
 
 
-def history_map(obs: pd.DataFrame, runs: list[dict], height: int = 600) -> folium.Figure:
+def history_map(obs: pd.DataFrame, runs: list[dict], height: int = 600, landfall: dict | None = None,
+                finished: bool = False) -> folium.Figure:
     """Past forecasts vs the observed track. One layer per forecast time ('made 48 h before'); the part of each
     forecast that has already happened is solid with gray connectors to the actual position at that moment."""
     from .history import SOURCES
@@ -397,7 +399,8 @@ def history_map(obs: pd.DataFrame, runs: list[dict], height: int = 600) -> foliu
             if not ahead.empty:
                 tail = pd.concat([done.tail(1), ahead])
                 folium.PolyLine(tail[["lat", "lon"]].values.tolist(), color=color, weight=2, opacity=0.6,
-                                dash_array="2 6", tooltip=f"{SOURCES[src]}: still in the future").add_to(layer)
+                                dash_array="2 6", tooltip=f"{SOURCES[src]}: " + ("after the storm ended" if finished
+                                                                                  else "still in the future")).add_to(layer)
             for p in df.itertuples():
                 when = f"{p.valid_time:%a %b %d %H:%MZ} (+{int(p.lead_time_hours)} h)"
                 if p.verified:
@@ -410,7 +413,8 @@ def history_map(obs: pd.DataFrame, runs: list[dict], height: int = 600) -> foliu
                                 f"{p.obs_wind_kt * 1.15078:.0f} mph")
                     tip = f"<b>{SOURCES[src]}</b> forecast for {when}<br><b>{p.err_mi:.0f} mi off</b>{wind}"
                 else:
-                    tip = f"<b>{SOURCES[src]}</b> forecast for {when}<br>not happened yet"
+                    tip = (f"<b>{SOURCES[src]}</b> forecast for {when}<br>"
+                           + ("after the storm ended" if finished else "not happened yet"))
                 folium.CircleMarker([p.lat, p.lon], radius=4.5 if p.verified else 3, color="white", weight=1.5,
                                     fill=True, fill_color=color, fill_opacity=1 if p.verified else 0.6,
                                     tooltip=tip).add_to(layer)
@@ -422,11 +426,83 @@ def history_map(obs: pd.DataFrame, runs: list[dict], height: int = 600) -> foliu
     for row in obs_u.dropna(subset=["wind_kt"]).itertuples():
         folium.CircleMarker([row.lat, row.lon], radius=5, color="white", weight=1.5, fill=True,
                             fill_color=OBS_COLOR, fill_opacity=1, tooltip=_point_tooltip(row, "Actual")).add_to(layer)
+    if landfall:
+        _add_landfall(layer, landfall)
 
     folium.LayerControl(collapsed=False).add_to(m)
     if all_lat:
         m.fit_bounds([[min(all_lat) - 1, min(all_lon) - 1.5], [max(all_lat) + 1, max(all_lon) + 1.5]])
     return fig
+
+
+def _add_landfall(layer, lf: dict) -> None:
+    t = pd.Timestamp(lf["time"])
+    local = t.tz_localize("UTC").tz_convert("America/Chicago")
+    where = f" near {lf['place']}" if lf.get("place") else ""
+    folium.Marker([lf["lat"], lf["lon"]], icon=folium.DivIcon(
+        html="<div style='font-size:26px;color:#d00000;text-shadow:0 0 3px #fff,0 0 3px #fff;"
+             "transform:translate(-9px,-17px)'>&#9733;</div>"),
+        tooltip=f"<b>Landfall{where}</b><br>about {local:%a %b} {local.day}, {local.hour % 12 or 12} {local:%p %Z} "
+                f"({t:%HZ})<br>about {lf['wind_kt'] * 1.15078:.0f} mph (estimated from the 6-hourly track)").add_to(layer)
+
+
+def review_map(obs: pd.DataFrame, means: pd.DataFrame, official: pd.DataFrame, landfall: dict | None = None,
+               every_hours: int = 12, height: int = 620) -> folium.Figure:
+    """Finished storm: every forecast made during its life (ensemble means, one line per run) against the
+    actual track. One layer per source; runs get darker as they get closer to the end of the storm."""
+    from .history import SOURCES
+
+    fig = folium.Figure(height=height)
+    m = folium.Map(tiles=None, control_scale=True).add_to(fig)
+    folium.TileLayer("Esri.WorldStreetMap", name="Street map").add_to(m)
+    folium.TileLayer("Esri.WorldGrayCanvas", name="Light gray map").add_to(m)   # last added = shown
+
+    obs_u = _unwrap(obs, [])
+    all_lat, all_lon = list(obs_u["lat"]), list(obs_u["lon"])
+    sources = [(model, means[means["model"] == model]) for model in ("WNV3", "OPER")]
+    sources.append(("NHC", official))
+    for src, df in sources:
+        if df is None or df.empty:
+            continue
+        df = df[df["init_time"].dt.hour % every_hours == 0]
+        inits = sorted(df["init_time"].unique())
+        layer = folium.FeatureGroup(name=f"{SOURCES[src]}: {len(inits)} forecasts, one every {every_hours} h",
+                                    show=src == "WNV3").add_to(m)
+        color = HISTORY_COLORS[src]
+        for k, init in enumerate(inits):
+            g = _unwrap(df[df["init_time"] == init].sort_values("valid_time"), [])
+            if "track_id" in g:
+                g = g[g["track_id"] == g["track_id"].iloc[0]]
+            opacity = 0.25 + 0.6 * (k + 1) / len(inits)
+            init_t = pd.Timestamp(init)
+            folium.PolyLine(g[["lat", "lon"]].values.tolist(), color=color, weight=2.5, opacity=opacity,
+                            tooltip=f"{SOURCES[src]} forecast made {init_t:%a %b} {init_t.day} {init_t:%HZ}").add_to(layer)
+            folium.CircleMarker(g[["lat", "lon"]].values[0].tolist(), radius=3, color=color, fill=True,
+                                fill_opacity=1, weight=1,
+                                tooltip=f"Start of the forecast made {init_t:%a %b} {init_t.day} {init_t:%HZ}").add_to(layer)
+            all_lat += list(g["lat"])
+            all_lon += list(g["lon"])
+
+    layer = folium.FeatureGroup(name=f"Actual track ({obs.attrs.get('source', 'observed')})").add_to(m)
+    folium.PolyLine(obs_u[["lat", "lon"]].values.tolist(), color=OBS_COLOR, weight=3, opacity=0.9).add_to(layer)
+    for row in obs_u.dropna(subset=["wind_kt"]).itertuples():
+        folium.CircleMarker([row.lat, row.lon], radius=3.5, color="white", weight=1, fill=True,
+                            fill_color=OBS_COLOR, fill_opacity=1, tooltip=_point_tooltip(row, "Actual")).add_to(layer)
+    if landfall:
+        _add_landfall(layer, landfall)
+
+    folium.LayerControl(collapsed=False).add_to(m)
+    lat_lo, lat_hi = np.percentile(all_lat, [2, 98])
+    lon_lo, lon_hi = np.percentile(all_lon, [2, 98])
+    m.fit_bounds([[min(lat_lo, obs_u["lat"].min()) - 1, min(lon_lo, obs_u["lon"].min()) - 1.5],
+                  [max(lat_hi, obs_u["lat"].max()) + 1, max(lon_hi, obs_u["lon"].max()) + 1.5]])
+    return fig
+
+
+REVIEW_INTRO = """<p>This storm is over, so instead of the newest forecast this map shows <b>every forecast made during
+its life</b> against where it <b style="color:#eb6834">actually went</b> (orange). Each thin line is one forecast run
+(the ensemble average); later runs are drawn darker. Lines that hug the orange track were good forecasts. Turn on the
+operational model and NHC in the box at top right to compare. A red star marks the estimated landfall, if there was one.</p>"""
 
 
 HISTORY_INTRO = """<p>The <b style="color:#eb6834">orange line</b> is where the storm actually went. Pick a forecast time
